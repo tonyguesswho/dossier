@@ -1,1 +1,36 @@
+# Planning (locally owned, per CLAUDE.md)
 .planning/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+
+# Env & secrets
+.env
+.env.local
+.env.*.local
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Alembic compiled
+backend/alembic/versions/__pycache__/
+
+# Docker volume mount
+.docker-data/

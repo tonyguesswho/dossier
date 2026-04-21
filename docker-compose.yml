@@ -1,0 +1,23 @@
+# Local Postgres with pgvector extension pre-installed.
+# Per .planning/phases/01-eval-harness-skeleton/01-CONTEXT.md D-15:
+# No RDS, no AWS spend during Phase 1. Same migration 0001 will run against RDS in Phase 3.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: dossier-postgres
+    environment:
+      POSTGRES_USER: dossier
+      POSTGRES_PASSWORD: dossier
+      POSTGRES_DB: dossier
+    ports:
+      - "5432:5432"
+    volumes:
+      - dossier_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dossier -d dossier"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  dossier_pg_data:
