@@ -1,0 +1,27 @@
+{
+  "_meta": {
+    "company_name": "Abundant",
+    "seed_url": "https://abundant.ai",
+    "vertical": "AI infra",
+    "authored_by": "Anthony Ugwu",
+    "authored_at": "YYYY-MM-DD — fill in when complete",
+    "instructions": [
+      "Author 6-12 claims total, covering all 6 sections (1-2 claims per section).",
+      "Every claim MUST have: section, claim_text, quoted_span, source_url, source_text.",
+      "quoted_span is the VERBATIM substring you can ctrl-F in the source page (Pitfall 1.1 defense).",
+      "source_text is a snapshot of the whole paragraph/section you pulled the quote from — captured at write-time so eval reproducibility survives web drift (D-04).",
+      "Sections are the 6 defined in models.py BriefSection: founders, company, market, product, risk, suggested_questions.",
+      "Remove this _meta block before committing (or leave it; the seed script filters it out).",
+      "Delete the empty example claim below once you have real claims."
+    ]
+  },
+  "claims": [
+    {
+      "section": "founders",
+      "claim_text": "Replace this with a single-sentence factual claim, e.g., 'Founder X previously led ML at Y from 2019 to 2023.'",
+      "quoted_span": "Replace with the VERBATIM substring from the source that grounds the claim.",
+      "source_url": "https://example.com/the-exact-page-you-quoted-from",
+      "source_text": "Replace with a paragraph-length snapshot of the source text at the time you authored this gold — this survives web drift per D-04."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "_meta": {
+    "company_name": "Browser Use",
+    "seed_url": "https://browser-use.com",
+    "vertical": "AI tooling",
+    "authored_by": "Anthony Ugwu",
+    "authored_at": "YYYY-MM-DD — fill in when complete",
+    "instructions": [
+      "Author 6-12 claims total, covering all 6 sections (1-2 claims per section).",
+      "Every claim MUST have: section, claim_text, quoted_span, source_url, source_text.",
+      "quoted_span is the VERBATIM substring you can ctrl-F in the source page (Pitfall 1.1 defense).",
+      "source_text is a snapshot of the whole paragraph/section you pulled the quote from — captured at write-time so eval reproducibility survives web drift (D-04).",
+      "Sections: founders, company, market, product, risk, suggested_questions.",
+      "Good Browser Use sources: github.com/browser-use/browser-use README, the project blog, TechCrunch coverage of the viral Chinese AI agent usage."
+    ]
+  },
+  "claims": [
+    {
+      "section": "founders",
+      "claim_text": "Replace with a single-sentence factual claim.",
+      "quoted_span": "Replace with the VERBATIM substring from the source.",
+      "source_url": "https://example.com/exact-source-page",
+      "source_text": "Replace with a paragraph-length snapshot of the source text at authoring time (D-04)."
+    }
+  ]
+}
