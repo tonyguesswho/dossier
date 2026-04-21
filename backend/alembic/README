@@ -1,0 +1,9 @@
+Generic single-database configuration for Dossier.
+
+Apply the migration:
+
+    cd backend
+    uv run alembic upgrade head
+
+DATABASE_URL is read from .env (see .env.example at repo root).
+Phase 1 uses the local pgvector/pgvector:pg17 docker-compose service.
