@@ -9,6 +9,9 @@ These cases lock the app-factory contract set by
   4. require_clerk_user_id is importable from dossier.api.dependencies.
   5. Dev bypass mode returns the env var value verbatim.
   6. No JWKS + no bypass + no creds → 401 missing_clerk_credentials.
+  7. JWKS set + no bearer → 401 missing_clerk_credentials.
+  8. JWKS set + creds with no sub → 401 invalid_clerk_jwt.
+  9. JWKS set + valid creds → returns sub claim.
 
 D-15: api module is the single api-lambda entry point; Phase 3 splits deployment.
 D-24: session auth model — JWT verified in FastAPI, sub claim is Clerk user_id.
@@ -69,21 +72,22 @@ def test_require_clerk_user_id_importable() -> None:
 # ---------------------------------------------------------------------------
 # Case 5: Dev bypass env var short-circuits auth and returns its value
 # ---------------------------------------------------------------------------
-def test_require_clerk_user_id_dev_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_require_clerk_user_id_dev_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DOSSIER_AUTH_DEV_BYPASS", "user_test_bypass_id")
     # Ensure no JWKS is set — bypass path must not require the guard to be configured.
     monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
 
-    from dossier.api.dependencies import require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
 
-    result = require_clerk_user_id(creds=None)
+    _reset_clerk_guard_cache()
+    result = await require_clerk_user_id(request=None, creds=None)
     assert result == "user_test_bypass_id"
 
 
 # ---------------------------------------------------------------------------
 # Case 6: fail-closed — no JWKS, no bypass, no creds → 401
 # ---------------------------------------------------------------------------
-def test_require_clerk_user_id_fail_closed_without_config(
+async def test_require_clerk_user_id_fail_closed_without_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DOSSIER_AUTH_DEV_BYPASS", raising=False)
@@ -91,10 +95,11 @@ def test_require_clerk_user_id_fail_closed_without_config(
 
     from fastapi import HTTPException
 
-    from dossier.api.dependencies import require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
 
+    _reset_clerk_guard_cache()
     with pytest.raises(HTTPException) as exc_info:
-        require_clerk_user_id(creds=None)
+        await require_clerk_user_id(request=None, creds=None)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "missing_clerk_credentials"
 
@@ -102,7 +107,7 @@ def test_require_clerk_user_id_fail_closed_without_config(
 # ---------------------------------------------------------------------------
 # Case 7: missing bearer with JWKS configured → 401 missing_clerk_credentials
 # ---------------------------------------------------------------------------
-def test_require_clerk_user_id_missing_bearer_with_jwks(
+async def test_require_clerk_user_id_missing_bearer_with_jwks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Even with JWKS set, if creds is None (no Authorization header) we fail closed.
@@ -113,10 +118,13 @@ def test_require_clerk_user_id_missing_bearer_with_jwks(
 
     from fastapi import HTTPException
 
-    from dossier.api.dependencies import require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
 
+    _reset_clerk_guard_cache()
     with pytest.raises(HTTPException) as exc_info:
-        require_clerk_user_id(creds=None)
+        # request=None and creds=None: simulates FastAPI DI with no auth header
+        # reaching the explicit-creds short-circuit.
+        await require_clerk_user_id(request=None, creds=None)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "missing_clerk_credentials"
 
@@ -124,7 +132,7 @@ def test_require_clerk_user_id_missing_bearer_with_jwks(
 # ---------------------------------------------------------------------------
 # Case 8: malformed JWT payload (no sub claim) → 401 invalid_clerk_jwt
 # ---------------------------------------------------------------------------
-def test_require_clerk_user_id_invalid_jwt_no_sub(
+async def test_require_clerk_user_id_invalid_jwt_no_sub(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DOSSIER_AUTH_DEV_BYPASS", raising=False)
@@ -135,8 +143,9 @@ def test_require_clerk_user_id_invalid_jwt_no_sub(
     from fastapi import HTTPException
     from fastapi_clerk_auth import HTTPAuthorizationCredentials
 
-    from dossier.api.dependencies import require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
 
+    _reset_clerk_guard_cache()
     # Simulate a decoded JWT missing the `sub` claim.
     fake_creds = HTTPAuthorizationCredentials(
         scheme="Bearer",
@@ -144,7 +153,7 @@ def test_require_clerk_user_id_invalid_jwt_no_sub(
         decoded={"aud": "clerk", "iat": 123},  # no `sub`
     )
     with pytest.raises(HTTPException) as exc_info:
-        require_clerk_user_id(creds=fake_creds)
+        await require_clerk_user_id(request=None, creds=fake_creds)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "invalid_clerk_jwt"
 
@@ -152,7 +161,7 @@ def test_require_clerk_user_id_invalid_jwt_no_sub(
 # ---------------------------------------------------------------------------
 # Case 9: valid creds with sub claim → returns the Clerk user_id string
 # ---------------------------------------------------------------------------
-def test_require_clerk_user_id_valid_creds_returns_sub(
+async def test_require_clerk_user_id_valid_creds_returns_sub(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("DOSSIER_AUTH_DEV_BYPASS", raising=False)
@@ -162,12 +171,29 @@ def test_require_clerk_user_id_valid_creds_returns_sub(
 
     from fastapi_clerk_auth import HTTPAuthorizationCredentials
 
-    from dossier.api.dependencies import require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
 
+    _reset_clerk_guard_cache()
     fake_creds = HTTPAuthorizationCredentials(
         scheme="Bearer",
         credentials="fake.jwt.token",
         decoded={"sub": "user_2abc123", "aud": "clerk"},
     )
-    result = require_clerk_user_id(creds=fake_creds)
+    result = await require_clerk_user_id(request=None, creds=fake_creds)
     assert result == "user_2abc123"
+
+
+# ---------------------------------------------------------------------------
+# Case 10: verify guard is cached across calls to avoid PyJWKClient rebuild
+# ---------------------------------------------------------------------------
+async def test_clerk_guard_is_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "CLERK_JWKS_URL", "https://example.clerk.accounts.dev/.well-known/jwks.json"
+    )
+
+    from dossier.api.dependencies import _get_clerk_guard, _reset_clerk_guard_cache
+
+    _reset_clerk_guard_cache()
+    guard1 = _get_clerk_guard()
+    guard2 = _get_clerk_guard()
+    assert guard1 is guard2, "guard should be cached at module level across calls"
