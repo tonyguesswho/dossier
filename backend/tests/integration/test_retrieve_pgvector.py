@@ -81,11 +81,22 @@ def _seed_one_chunk(
 
 
 def _cleanup(engine, investigation_id: uuid.UUID) -> None:
+    """Delete the investigation and the test user ONLY if no other investigations remain.
+
+    Guards against FK violation when two scoping-test investigations share the same
+    test user — deleting the user after the first investigation would cascade-fail
+    while the second investigation still references it.
+    """
     with engine.begin() as conn:
         conn.execute(
             text("DELETE FROM investigations WHERE id = :id"), {"id": str(investigation_id)}
         )
-        conn.execute(text("DELETE FROM users WHERE id = 'test-user-ret'"))
+        conn.execute(
+            text(
+                "DELETE FROM users WHERE id = 'test-user-ret' "
+                "AND NOT EXISTS (SELECT 1 FROM investigations WHERE user_id = 'test-user-ret')"
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
