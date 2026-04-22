@@ -1,1 +1,215 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* === shadcn/ui — new-york style + neutral baseColor ===
+ * Required by shadcn components under components/ui/*.tsx that reference
+ * tokens like bg-primary, text-primary-foreground, border-border, ring-ring.
+ * Values derived from shadcn's neutral preset (light mode only per UI-SPEC §Color:
+ * "Light mode only. Dark mode is explicitly out of scope for all phases.")
+ *
+ * These are the *shadcn-owned* tokens. The UI-SPEC block below adds project-specific
+ * design tokens (accent, success, warning, etc.) that shadcn doesn't ship.
+ */
+:root {
+  --radius: 0.5rem;
+
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+
+  --destructive: oklch(0.577 0.245 27.325);
+
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+}
+
+/* === UI-SPEC §Tailwind 4 Theme Override ===
+ * Project-specific design tokens layered on top of shadcn. These drive
+ * typography scale, mono/sans font bindings, and Dossier's color tokens
+ * (background, foreground, accent, success, warning, destructive, muted,
+ * border, card, and the reserved quote-bg for Phase 4 citation hover).
+ *
+ * Using @theme (not @theme inline) so values become *direct* Tailwind
+ * utility classes — e.g. text-display, leading-body, font-sans map here.
+ */
+@theme {
+  /* Typography — Geist */
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "Cascadia Code", monospace;
+
+  /* Type scale */
+  --text-display:    1.875rem; /* 30px */
+  --text-heading:    1.25rem;  /* 20px */
+  --text-subheading: 1rem;     /* 16px */
+  --text-body:       0.9375rem;/* 15px */
+  --text-small:      0.8125rem;/* 13px */
+  --text-mono:       0.8125rem;/* 13px */
+
+  /* Leading */
+  --leading-display:    2.25rem;
+  --leading-heading:    1.75rem;
+  --leading-subheading: 1.5rem;
+  --leading-body:       1.5rem;
+  --leading-small:      1.25rem;
+
+  /* Tracking */
+  --tracking-display:    -0.02em;
+  --tracking-heading:    -0.01em;
+  --tracking-subheading: 0em;
+  --tracking-body:       0em;
+
+  /* Project color tokens */
+  --color-background:  #fafaf9;
+  --color-card:        #ffffff;
+  --color-border:      #e7e5e4;
+  --color-foreground:  #1c1917;
+  --color-muted:       #78716c;
+  --color-accent:      #4f46e5;
+  --color-success:     #16a34a;
+  --color-warning:     #d97706;
+  --color-destructive: #dc2626;
+  --color-quote-bg:    #fef3c7; /* RESERVED — Phase 4 citation hover only. DO NOT use in Phase 2. */
+}
+
+/* === UI-SPEC §Prose Override ===
+ * Overrides @tailwindcss/typography defaults so rendered markdown briefs
+ * match the project type scale and accent color. Applied to the brief
+ * container via `prose prose-brief max-w-none` in Plan 02-11.
+ */
+.prose-brief {
+  --tw-prose-body:        var(--color-foreground);
+  --tw-prose-headings:    var(--color-foreground);
+  --tw-prose-lead:        var(--color-muted);
+  --tw-prose-links:       var(--color-accent);
+  --tw-prose-bold:        var(--color-foreground);
+  --tw-prose-code:        var(--color-foreground);
+  --tw-prose-pre-bg:      #f4f4f5;
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+}
+.prose-brief h2 {
+  font-size: var(--text-heading);
+  line-height: var(--leading-heading);
+  letter-spacing: var(--tracking-heading);
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 0.75rem;
+}
+.prose-brief h3 {
+  font-size: var(--text-subheading);
+  line-height: var(--leading-subheading);
+  font-weight: 600;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+.prose-brief p {
+  margin-top: 0;
+  margin-bottom: 1rem;
+}
+.prose-brief a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* === UI-SPEC §Print Stylesheet Contract — BRIEF-07 / D-21 ===
+ * PDF export uses window.print() not react-pdf. This block strips chrome,
+ * tightens margins, forces URL annotation after links, and keeps section
+ * headings on-page with their first paragraph. Targets Chrome/Firefox;
+ * Safari drift is acceptable per UI-SPEC.
+ */
+@media print {
+  header, nav, .no-print, [data-no-print] { display: none !important; }
+  @page { margin: 1.5cm 2cm; size: A4; }
+  body {
+    background: white !important;
+    color: #1c1917 !important;
+    font-family: "Geist Sans", Georgia, serif;
+    font-size: 12pt;
+    line-height: 1.6;
+  }
+  h1 { font-size: 20pt; font-weight: 600; margin-bottom: 4pt; }
+  h2 {
+    font-size: 13pt; font-weight: 600;
+    margin-top: 16pt; margin-bottom: 6pt;
+    border-bottom: 0.5pt solid #e7e5e4;
+    padding-bottom: 3pt;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 11pt; font-weight: 600;
+    margin-top: 10pt; margin-bottom: 4pt;
+    page-break-after: avoid;
+  }
+  h2 + p, h3 + p { page-break-before: avoid; }
+  p { orphans: 3; widows: 3; margin-bottom: 6pt; }
+  a[href]::after {
+    content: " (" attr(href) ")";
+    font-size: 9pt;
+    color: #78716c;
+  }
+  nav a::after, .no-print a::after { content: none; }
+  .prose-brief { max-width: none !important; }
+  .brief-meta { font-size: 9pt; color: #78716c; margin-bottom: 12pt; }
+  details { display: block !important; }
+  details > summary {
+    font-weight: 600;
+    font-size: 11pt;
+    margin-top: 16pt;
+    list-style: none;
+  }
+  details > summary::marker { display: none; }
+}
