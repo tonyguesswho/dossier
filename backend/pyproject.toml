@@ -73,8 +73,12 @@ packages = ["src/dossier"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests/unit"]
-# Phase 1: additional test tiers (integration, eval) are scaffolded by later phases per STACK.md §2.11 + CONTEXT.md D-20 — kept out of testpaths so pytest collection stays unit-only.
+testpaths = ["tests/unit", "tests/integration"]
+# Phase 2 adds tests/integration/ per STACK.md §2.11 + CONTEXT.md D-15 logical module split.
+# tests/eval/ remains scaffolded-but-excluded; Phase 4 wires it in (CONTEXT §deferred).
+markers = [
+    "integration: real DB + mocked HTTP (respx); slower than unit",
+]
 
 [tool.ruff]
 line-length = 100
