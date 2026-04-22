@@ -85,7 +85,7 @@ def _get_clerk_guard() -> ClerkHTTPBearer | None:
 
 
 async def require_clerk_user_id(
-    request: Request | None = None,
+    request: Request = None,  # type: ignore[assignment]
     creds: Optional[HTTPAuthorizationCredentials] = None,
 ) -> str:
     """Return the verified Clerk user_id (sub claim) or raise 401.

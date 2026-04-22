@@ -34,7 +34,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from dossier.api.routes import health
+from dossier.api.routes import health, investigations
 
 app = FastAPI(title="Dossier API", version="0.1.0")
 
@@ -50,10 +50,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
-
-# Wave 2 Plan 02-09 will add:
-#   app.include_router(investigations.router)
-# Keeping the line commented so the mount point is discoverable by grep.
+app.include_router(investigations.router)
 
 
 __all__ = ["app"]
