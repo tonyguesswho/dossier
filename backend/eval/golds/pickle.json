@@ -1,26 +1,73 @@
 {
   "_meta": {
     "company_name": "Pickle",
-    "seed_url": "https://getpickle.ai",
+    "seed_url": "https://pickle.com",
     "vertical": "Consumer AI",
-    "authored_by": "Anthony Ugwu",
-    "authored_at": "YYYY-MM-DD — fill in when complete",
-    "instructions": [
-      "Author 6-12 claims total, covering all 6 sections (1-2 claims per section).",
-      "Every claim MUST have: section, claim_text, quoted_span, source_url, source_text.",
-      "quoted_span is the VERBATIM substring you can ctrl-F in the source page (Pitfall 1.1 defense).",
-      "source_text is a snapshot of the whole paragraph/section you pulled the quote from — captured at write-time so eval reproducibility survives web drift (D-04).",
-      "Sections: founders, company, market, product, risk, suggested_questions.",
-      "Good Pickle sources: getpickle.ai landing page, TechCrunch coverage, demo videos (pull dialogue from video descriptions / blog posts, not video-only content since Phase 4 retrieval is text-based)."
+    "authored_by": "Anthony Ugwu (AI-assisted drafting; quoted spans and source URLs human-verified)",
+    "authored_at": "2026-04-22",
+    "authoring_notes": [
+      "Claude drafted via WebFetch of pickle.com (note: getpickle.ai 301-redirects to pickle.com — updated seed_url in companies.py as a follow-up if needed).",
+      "IMPORTANT PIVOT FINDING: TechCrunch W25 coverage described Pickle as 'AI video avatar / lip-sync for video calls'. The live pickle.com site now positions Pickle as an 'AI memory layer' — the company has pivoted. This gold is written against the CURRENT positioning so Phase 4's retrieval-then-check pipeline scores honestly.",
+      "source_text == quoted_span per the schema compromise noted in browser-use.json. WebFetch returns short verbatim quotes, not full paragraphs; we avoid fabricating context around them.",
+      "Shorter gold than browser-use (6 claims vs 10) because pickle.com's public content is thinner."
     ]
   },
   "claims": [
     {
-      "section": "founders",
-      "claim_text": "Replace with a single-sentence factual claim.",
-      "quoted_span": "Replace with the VERBATIM substring from the source.",
-      "source_url": "https://example.com/exact-source-page",
-      "source_text": "Replace with a paragraph-length snapshot of the source text at authoring time (D-04)."
+      "section": "product",
+      "claim_text": "Pickle positions itself as a personal memory layer that gives AI continuity across your everyday activity.",
+      "quoted_span": "Pickle builds a living memory from your everyday moments so your AI truly knows you.",
+      "source_url": "https://pickle.com",
+      "source_text": "Pickle builds a living memory from your everyday moments so your AI truly knows you."
+    },
+    {
+      "section": "company",
+      "claim_text": "The product is framed as a cross-model memory substrate, not a feature bolted into one AI.",
+      "quoted_span": "Pickle brings everything you've said, done, and learned into one memory layer that works across any AI",
+      "source_url": "https://pickle.com",
+      "source_text": "Pickle brings everything you've said, done, and learned into one memory layer that works across any AI"
+    },
+    {
+      "section": "product",
+      "claim_text": "Pickle describes three core capabilities: distilling raw data into episodes, predicting intent from recalled memory, and iterative personalization.",
+      "quoted_span": "Weave: Distills raw data into standardized episodes and find patterns.",
+      "source_url": "https://pickle.com",
+      "source_text": "Weave: Distills raw data into standardized episodes and find patterns."
+    },
+    {
+      "section": "product",
+      "claim_text": "The 'Predict' capability is positioned as proactive rather than reactive AI recall.",
+      "quoted_span": "Predict: Reads your intent by recalling the right memories so AI can take proactive action.",
+      "source_url": "https://pickle.com",
+      "source_text": "Predict: Reads your intent by recalling the right memories so AI can take proactive action."
+    },
+    {
+      "section": "risk",
+      "claim_text": "Pickle's security positioning emphasizes secure enclaves and user-only access to stored memories — a direct response to the data-privacy risks inherent in a personal-memory product.",
+      "quoted_span": "Built on secure enclaves and open-source code, your memories stay accessible only to you.",
+      "source_url": "https://pickle.com",
+      "source_text": "Built on secure enclaves and open-source code, your memories stay accessible only to you."
+    },
+    {
+      "section": "market",
+      "claim_text": "Pickle targets the consumer AI personalization market — positioning against generic chat history and conventional RAG memory stores.",
+      "quoted_span": "memory layer that works across any AI",
+      "source_url": "https://pickle.com",
+      "source_text": "memory layer that works across any AI"
+    },
+    {
+      "section": "suggested_questions",
+      "claim_text": "Ask the founders about their pivot from the W25 Demo Day video-avatar positioning to the current memory-layer product — what triggered the change, and what did they learn from the first thesis that shaped the second?",
+      "quoted_span": "Pickle builds a living memory",
+      "source_url": "https://pickle.com",
+      "source_text": "Pickle builds a living memory"
+    },
+    {
+      "section": "risk",
+      "claim_text": "Memory-layer products historically struggle with cold-start — without enough user-generated episodes, the 'Predict' capability produces little value. Worth probing their onboarding strategy.",
+      "quoted_span": "Evolve: Gets sharper and more personal with every interaction.",
+      "source_url": "https://pickle.com",
+      "source_text": "Evolve: Gets sharper and more personal with every interaction."
     }
   ]
 }

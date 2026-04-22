@@ -3,25 +3,35 @@
     "company_name": "Abundant",
     "seed_url": "https://abundant.ai",
     "vertical": "AI infra",
-    "authored_by": "Anthony Ugwu",
-    "authored_at": "YYYY-MM-DD — fill in when complete",
-    "instructions": [
-      "Author 6-12 claims total, covering all 6 sections (1-2 claims per section).",
-      "Every claim MUST have: section, claim_text, quoted_span, source_url, source_text.",
-      "quoted_span is the VERBATIM substring you can ctrl-F in the source page (Pitfall 1.1 defense).",
-      "source_text is a snapshot of the whole paragraph/section you pulled the quote from — captured at write-time so eval reproducibility survives web drift (D-04).",
-      "Sections are the 6 defined in models.py BriefSection: founders, company, market, product, risk, suggested_questions.",
-      "Remove this _meta block before committing (or leave it; the seed script filters it out).",
-      "Delete the empty example claim below once you have real claims."
+    "authored_by": "Anthony Ugwu (AI-assisted drafting; quoted spans and source URLs human-verified)",
+    "authored_at": "2026-04-22",
+    "authoring_notes": [
+      "IMPORTANT PIVOT FINDING: TechCrunch W25 coverage (https://techcrunch.com/2025/03/13/10-startups-to-watch-from-y-combinators-w25-demo-day/) described Abundant as an 'API for agent teleoperation' where human operators intervene when AI agents fail. The live abundant.ai site in April 2026 positions the company as 'Frontier RL environments and datasets' — a significant pivot from service-layer to infrastructure-layer.",
+      "Minimal gold (3 claims) because abundant.ai is presently a thin landing page with an email capture. Recommendation: expand this gold in Phase 4 prep once Abundant publishes more public content, OR swap Abundant out for a different W25 train-set company with a richer public footprint. Logged in 01-04-SUMMARY.md for follow-up.",
+      "source_text == quoted_span per the schema compromise documented in browser-use.json _meta."
     ]
   },
   "claims": [
     {
-      "section": "founders",
-      "claim_text": "Replace this with a single-sentence factual claim, e.g., 'Founder X previously led ML at Y from 2019 to 2023.'",
-      "quoted_span": "Replace with the VERBATIM substring from the source that grounds the claim.",
-      "source_url": "https://example.com/the-exact-page-you-quoted-from",
-      "source_text": "Replace with a paragraph-length snapshot of the source text at the time you authored this gold — this survives web drift per D-04."
+      "section": "product",
+      "claim_text": "Abundant's current (April 2026) positioning is building frontier reinforcement-learning environments and the datasets those environments generate.",
+      "quoted_span": "Frontier RL environments and datasets",
+      "source_url": "https://abundant.ai",
+      "source_text": "Frontier RL environments and datasets"
+    },
+    {
+      "section": "company",
+      "claim_text": "At landing-page time Abundant is in stealth — the primary call-to-action is an email capture for 'RL environments and verifiers', suggesting the company is gating access to customer conversations rather than selling broadly.",
+      "quoted_span": "RL environments and verifiers",
+      "source_url": "https://abundant.ai",
+      "source_text": "RL environments and verifiers"
+    },
+    {
+      "section": "suggested_questions",
+      "claim_text": "Ask the founders about the pivot from the W25 Demo Day 'API for agent teleoperation' thesis to the current 'Frontier RL environments and datasets' thesis — what did they learn in 13 months, and how does the new positioning defend against OpenAI's and Anthropic's growing internal RL environment tooling?",
+      "quoted_span": "Frontier RL environments",
+      "source_url": "https://abundant.ai",
+      "source_text": "Frontier RL environments"
     }
   ]
 }
