@@ -54,6 +54,15 @@ def _normalize(text: str) -> str:
     return stripped
 
 
+# Public re-export. D-07 contract lock: `dossier.investigate.ground` imports this
+# so grounding uses the SAME rule Phase 4 eval uses. Drift here silently breaks
+# eval — the same chunk text, normalized two different ways, would compute
+# different precision scores depending on whether you asked ingest-time or
+# eval-time. The alias is a function-object identity ref (`normalize is _normalize`),
+# so any change to `_normalize` propagates to ground.py automatically.
+normalize = _normalize
+
+
 def citation_precision(claims: list[Claim], corpus: dict[str, str]) -> float:
     """Fraction of claims whose quoted_span appears (normalized) in the cited chunk.
 
@@ -86,4 +95,4 @@ def citation_precision(claims: list[Claim], corpus: dict[str, str]) -> float:
     return hits / len(claims)
 
 
-__all__ = ["citation_precision"]
+__all__ = ["citation_precision", "normalize"]
