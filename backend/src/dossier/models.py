@@ -70,4 +70,58 @@ class GoldClaim(BaseModel):
     source_text: str
 
 
-__all__ = ["BriefSection", "Claim", "GoldClaim"]
+class BriefClaim(BaseModel):
+    """One claim emitted by the synthesizer, pre-grounding.
+
+    The synthesizer returns (claim_text, quoted_span, source_chunk_id) per CONTEXT.md D-03.
+    Phase 2's ground.py resolves these to full Claim rows with grounded_span_* fields
+    via normalized-substring match against source_chunks.text. Claims that cannot be
+    grounded are still written with grounded_source_chunk_id=NULL per D-06 so Phase 4's
+    hallucination_rate metric can count them.
+
+    Rejected alternatives:
+      - Inline [S:chunk_id] citation markers in brief_markdown (ARCHITECTURE.md §4):
+        defers to Phase 4 — Phase 2 uses structured Pydantic claim rows instead.
+      - source_chunk_id as UUID: keep as str to match Claim (models.py line 49) —
+        synthetic tests and real DB callers both use this type.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    claim_text: str
+    quoted_span: str
+    source_chunk_id: str
+
+
+class Brief(BaseModel):
+    """A full 6-section brief as emitted by the synthesizer (CONTEXT.md D-03 / BRIEF-01).
+
+    Passes through `openai.beta.chat.completions.parse` per D-03/D-05 — structured
+    output validated at the API boundary, not regex-parsed. Malformed JSON from
+    OpenRouter fails fast with a clear error in investigations.error rather than
+    limping forward with a half-parsed brief.
+
+    Field names are template slots (not DB section values). They align with BRIEF-01's
+    six fixed sections: Founders, Company, Market, Product, Risk Flags, Suggested Questions.
+    Note the plural `risk_flags` here vs. the singular `risk` BriefSection literal — the
+    Literal names DB-column section values (used by Claim.section); the Brief field names
+    are synthesizer-facing slot names.
+
+    Phase 2 scope notes:
+      - BRIEF-04 (risk flags as citable specific concerns) tightens in Phase 4.
+      - BRIEF-03 (suggested_questions auto-gen from risk flags + retrieval gaps) tightens
+        in Phase 4. Phase 2 emits best-effort suggested_questions only.
+      - BRIEF-05 (confidence badges) deferred to Phase 4 — no `confidence: float` field here.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    founders: list[BriefClaim]
+    company: list[BriefClaim]
+    market: list[BriefClaim]
+    product: list[BriefClaim]
+    risk_flags: list[BriefClaim]
+    suggested_questions: list[BriefClaim]
+
+
+__all__ = ["BriefSection", "BriefClaim", "Brief", "Claim", "GoldClaim"]
