@@ -77,10 +77,10 @@ async def test_require_clerk_user_id_dev_bypass(monkeypatch: pytest.MonkeyPatch)
     # Ensure no JWKS is set — bypass path must not require the guard to be configured.
     monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
 
-    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, _verify_clerk_credentials
 
     _reset_clerk_guard_cache()
-    result = await require_clerk_user_id(request=None, creds=None)
+    result = await _verify_clerk_credentials(request=None, creds=None)
     assert result == "user_test_bypass_id"
 
 
@@ -95,11 +95,11 @@ async def test_require_clerk_user_id_fail_closed_without_config(
 
     from fastapi import HTTPException
 
-    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, _verify_clerk_credentials
 
     _reset_clerk_guard_cache()
     with pytest.raises(HTTPException) as exc_info:
-        await require_clerk_user_id(request=None, creds=None)
+        await _verify_clerk_credentials(request=None, creds=None)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "missing_clerk_credentials"
 
@@ -118,13 +118,13 @@ async def test_require_clerk_user_id_missing_bearer_with_jwks(
 
     from fastapi import HTTPException
 
-    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, _verify_clerk_credentials
 
     _reset_clerk_guard_cache()
     with pytest.raises(HTTPException) as exc_info:
         # request=None and creds=None: simulates FastAPI DI with no auth header
         # reaching the explicit-creds short-circuit.
-        await require_clerk_user_id(request=None, creds=None)
+        await _verify_clerk_credentials(request=None, creds=None)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "missing_clerk_credentials"
 
@@ -143,7 +143,7 @@ async def test_require_clerk_user_id_invalid_jwt_no_sub(
     from fastapi import HTTPException
     from fastapi_clerk_auth import HTTPAuthorizationCredentials
 
-    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, _verify_clerk_credentials
 
     _reset_clerk_guard_cache()
     # Simulate a decoded JWT missing the `sub` claim.
@@ -153,7 +153,7 @@ async def test_require_clerk_user_id_invalid_jwt_no_sub(
         decoded={"aud": "clerk", "iat": 123},  # no `sub`
     )
     with pytest.raises(HTTPException) as exc_info:
-        await require_clerk_user_id(request=None, creds=fake_creds)
+        await _verify_clerk_credentials(request=None, creds=fake_creds)
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "invalid_clerk_jwt"
 
@@ -171,7 +171,7 @@ async def test_require_clerk_user_id_valid_creds_returns_sub(
 
     from fastapi_clerk_auth import HTTPAuthorizationCredentials
 
-    from dossier.api.dependencies import _reset_clerk_guard_cache, require_clerk_user_id
+    from dossier.api.dependencies import _reset_clerk_guard_cache, _verify_clerk_credentials
 
     _reset_clerk_guard_cache()
     fake_creds = HTTPAuthorizationCredentials(
@@ -179,7 +179,7 @@ async def test_require_clerk_user_id_valid_creds_returns_sub(
         credentials="fake.jwt.token",
         decoded={"sub": "user_2abc123", "aud": "clerk"},
     )
-    result = await require_clerk_user_id(request=None, creds=fake_creds)
+    result = await _verify_clerk_credentials(request=None, creds=fake_creds)
     assert result == "user_2abc123"
 
 

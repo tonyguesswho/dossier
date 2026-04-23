@@ -84,28 +84,15 @@ def _get_clerk_guard() -> ClerkHTTPBearer | None:
     return _CLERK_GUARD_CACHE
 
 
-async def require_clerk_user_id(
-    request: Request = None,  # type: ignore[assignment]
-    creds: Optional[HTTPAuthorizationCredentials] = None,
+async def _verify_clerk_credentials(
+    request: Request | None, creds: Optional[HTTPAuthorizationCredentials]
 ) -> str:
-    """Return the verified Clerk user_id (sub claim) or raise 401.
+    """Core verification logic shared by the FastAPI dep and direct-call tests.
 
-    Called as a FastAPI dependency: `user_id: str = Depends(require_clerk_user_id)`.
-    FastAPI injects `request` automatically; tests may call directly with `creds`
-    set to exercise the verification branches deterministically.
-
-    DEV-ONLY bypass: if DOSSIER_AUTH_DEV_BYPASS is set to a non-empty string,
-    return its value verbatim. NEVER set DOSSIER_AUTH_DEV_BYPASS in deployed
-    envs; it short-circuits auth entirely. Documented in .env.example.
-
-    Production behavior (no bypass, CLERK_JWKS_URL set):
-      - Missing bearer: 401 {"detail": "missing_clerk_credentials"}
-      - Invalid signature or malformed (no sub claim): 401 {"detail": "invalid_clerk_jwt"}
-      - Valid: returns the `sub` claim string (e.g., "user_2abc123").
-
-    No JWKS configured AND no bypass → fail closed with 401
-    missing_clerk_credentials. This prevents a misconfigured deploy from
-    accidentally serving unauthenticated requests.
+    Not exposed as a FastAPI dependency. The public entry point
+    `require_clerk_user_id` wraps this with a FastAPI-friendly signature
+    (single `request` param) that doesn't confuse FastAPI's body-field
+    introspection when used as a sub-dependency via `Depends(...)`.
     """
     load_env()
     dev_bypass = os.environ.get("DOSSIER_AUTH_DEV_BYPASS", "").strip()
@@ -148,4 +135,32 @@ async def require_clerk_user_id(
     return user_id
 
 
-__all__ = ["require_clerk_user_id"]
+async def require_clerk_user_id(request: Request) -> str:
+    """Return the verified Clerk user_id (sub claim) or raise 401.
+
+    FastAPI dependency: `user_id: str = Depends(require_clerk_user_id)`.
+    Signature is intentionally minimal (only `request: Request`) so FastAPI's
+    sub-dependency introspection does not try to materialize other parameters
+    as body fields on every route that depends on this function.
+
+    Tests that need to exercise the verification branches deterministically
+    should import and call `_verify_clerk_credentials(request, creds)` directly —
+    that's the kernel this wrapper delegates to.
+
+    DEV-ONLY bypass: if DOSSIER_AUTH_DEV_BYPASS is set to a non-empty string,
+    return its value verbatim. NEVER set DOSSIER_AUTH_DEV_BYPASS in deployed
+    envs; it short-circuits auth entirely. Documented in .env.example.
+
+    Production behavior (no bypass, CLERK_JWKS_URL set):
+      - Missing bearer: 401 {"detail": "missing_clerk_credentials"}
+      - Invalid signature or malformed (no sub claim): 401 {"detail": "invalid_clerk_jwt"}
+      - Valid: returns the `sub` claim string (e.g., "user_2abc123").
+
+    No JWKS configured AND no bypass → fail closed with 401
+    missing_clerk_credentials. This prevents a misconfigured deploy from
+    accidentally serving unauthenticated requests.
+    """
+    return await _verify_clerk_credentials(request, None)
+
+
+__all__ = ["_verify_clerk_credentials", "require_clerk_user_id"]
