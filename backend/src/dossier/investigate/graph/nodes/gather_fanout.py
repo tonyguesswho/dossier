@@ -24,8 +24,22 @@ from dossier.investigate.tools.newsapi import search as newsapi_search
 from dossier.investigate.tools.types import ToolResult
 
 from ..state import DossierState, RetrievedChunkRef
+from .ingest_and_embed import cache_tool_result
 
 logger = logging.getLogger(__name__)
+
+
+def _cache_results(investigation_id: str, results: list[ToolResult]) -> None:
+    """Register every ToolResult with ingest_and_embed's cache.
+
+    State cannot carry raw source text (ARCHITECTURE.md §9 anti-pattern), so
+    each tool node hands its ToolResult objects off to a module-level cache
+    keyed by investigation_id. ingest_and_embed.run() drains the cache once
+    the Stage-2 fan-out has converged. Per-url overwrite means a re-gather
+    pass cleanly supersedes the previous fetch without duplicating state.
+    """
+    for result in results:
+        cache_tool_result(investigation_id, result)
 
 
 def _tool_results_to_chunk_refs(
@@ -111,6 +125,7 @@ async def run_exa(state: DossierState) -> dict:
         logger.warning("run_exa: unexpected exa.search error for %r", query, exc_info=True)
         results = []
 
+    _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_exa: company=%s got %d results", company, len(results))
     return {"retrieved_chunks": refs}
@@ -121,6 +136,7 @@ async def run_newsapi(state: DossierState) -> dict:
     company = state["company"]
     context_hint = state.get("context_hint")
     results = await newsapi_search(company=company, context_hint=context_hint)
+    _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_newsapi: company=%s got %d results", company, len(results))
     return {"retrieved_chunks": refs}
@@ -147,6 +163,7 @@ async def run_firecrawl(state: DossierState) -> dict:
         logger.warning("run_firecrawl: crawl_seed_url error for url=%s", input_url, exc_info=True)
         results = []
 
+    _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_firecrawl: url=%s got %d results", input_url, len(results))
     return {"retrieved_chunks": refs}
@@ -170,6 +187,7 @@ async def run_github_founder(state: DossierState) -> dict:
         )
         results = []
 
+    _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="founders")
     logger.info("run_github_founder: founder=%r got %d results", founder, len(results))
     return {"retrieved_chunks": refs}
@@ -179,6 +197,7 @@ async def run_crunchbase(state: DossierState) -> dict:
     """Crunchbase org enrichment. Native async (Plan 03-04)."""
     company = state["company"]
     results = await crunchbase_search(company=company)
+    _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="company")
     logger.info("run_crunchbase: company=%s got %d results", company, len(results))
     return {"retrieved_chunks": refs}
