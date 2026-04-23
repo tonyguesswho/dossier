@@ -6,3 +6,6 @@ Build order: state.py -> nodes/ -> graph.py -> runner.py.
 Exports (populated as plans execute):
   build_graph -- StateGraph factory (graph.py, Plan 03-02)
 """
+from .graph import build_graph
+
+__all__ = ["build_graph"]
