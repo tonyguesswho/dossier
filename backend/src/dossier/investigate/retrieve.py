@@ -42,7 +42,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.core.llm import embedding_model, strong_model
+from dossier.core.llm import embedding_client, embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +79,13 @@ def _vector_literal(vec: list[float]) -> str:
 
 
 def _embed_query(query: str) -> list[float]:
-    """Embed a single query string via text-embedding-3-small (through OpenRouter).
+    """Embed a single query string via text-embedding-3-small.
 
-    Exposed at module scope (not inlined in retrieve_top_k) so tests can
-    monkeypatch with a fixed vector — see test_retrieve_pgvector.py.
+    Uses embedding_client() (direct OpenAI), NOT strong_model() (OpenRouter) —
+    OpenRouter doesn't proxy /v1/embeddings. Exposed at module scope so tests
+    can monkeypatch with a fixed vector — see test_retrieve_pgvector.py.
     """
-    client = strong_model()
+    client = embedding_client()
     resp = client.embeddings.create(model=embedding_model(), input=[query])
     return resp.data[0].embedding
 

@@ -73,12 +73,39 @@ def strong_model() -> OpenAI:
 
 
 def embedding_model() -> str:
-    """Return the embedding model id. Callers pass this to client.embeddings.create.
+    """Return the embedding model id. Pair with embedding_client(), NOT strong_model().
 
-    NOTE: embeddings go through the same OpenAI client (via OpenRouter), which
-    proxies text-embedding-3-small at OpenAI. Use strong_model() to get the client.
+    Embeddings go direct to api.openai.com — OpenRouter's /v1 surface is chat
+    completions only and returns an empty data list for /v1/embeddings requests,
+    which the openai SDK post-parser rejects with
+    `ValueError: No embedding data received`. Use embedding_client() to get a
+    client pointed at OpenAI's native endpoint.
     """
     return EMBEDDING_MODEL_ID
+
+
+def read_openai_api_key(strict: bool = True) -> str:
+    """Return OPENAI_API_KEY for direct (non-OpenRouter) embedding calls."""
+    load_env()
+    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if strict and not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY not set. Required for embeddings — OpenRouter does "
+            "not proxy /v1/embeddings. Add the key to .env; get one at "
+            "https://platform.openai.com/api-keys."
+        )
+    return api_key
+
+
+def embedding_client() -> OpenAI:
+    """Return an openai.OpenAI client pointed at api.openai.com (no base_url override).
+
+    Intentionally bypasses OpenRouter: OpenRouter proxies chat completions, not
+    embeddings. Keeps chat/synth traffic on OpenRouter for unified billing while
+    embeddings go direct.
+    """
+    api_key = read_openai_api_key(strict=True)
+    return OpenAI(api_key=api_key)  # default base_url = https://api.openai.com/v1
 
 
 def cheap_model() -> str:
@@ -92,7 +119,9 @@ __all__ = [
     "OPENROUTER_BASE_URL",
     "STRONG_MODEL_ID",
     "cheap_model",
+    "embedding_client",
     "embedding_model",
+    "read_openai_api_key",
     "read_openrouter_env",
     "strong_model",
 ]

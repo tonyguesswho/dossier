@@ -44,7 +44,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.core.llm import EMBEDDING_MODEL_ID, embedding_model, strong_model
+from dossier.core.llm import EMBEDDING_MODEL_ID, embedding_client, embedding_model
 from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -132,10 +132,14 @@ def _chunk_text(full_text: str) -> list[ChunkSpan]:
 
 
 def _embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
-    """Batch-embed chunk texts via OpenAI text-embedding-3-small (through OpenRouter)."""
+    """Batch-embed chunk texts via OpenAI text-embedding-3-small.
+
+    Uses embedding_client() (direct OpenAI), NOT strong_model() (OpenRouter).
+    OpenRouter's /v1 surface is chat completions only; embeddings go direct.
+    """
     if not chunk_texts:
         return []
-    client = strong_model()
+    client = embedding_client()
     model = embedding_model()
     embeddings: list[list[float]] = []
     for i in range(0, len(chunk_texts), EMBED_BATCH_SIZE):
