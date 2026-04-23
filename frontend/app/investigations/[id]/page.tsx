@@ -34,6 +34,7 @@ import { use } from "react";
 import { Toaster } from "sonner";
 
 import { BriefViewer } from "@/components/BriefViewer";
+import { ChatPane } from "@/components/ChatPane";
 import { RunningState } from "@/components/RunningState";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -122,10 +123,14 @@ export default function InvestigationDetailPage({
   const { status } = statusQuery.data;
 
   // Brief view — only when status=complete AND the brief payload has landed.
+  // ChatPane renders below the brief in the same container. Gated on the same
+  // complete-status check so a running or failed investigation never shows the
+  // chat input (Phase 6-lite 03-14-PLAN.md — chat requires grounded chunks).
   if (status === "complete" && briefQuery.data) {
     return (
       <div className="min-h-screen bg-background">
         <BriefViewer brief={briefQuery.data} />
+        <ChatPane investigationId={id} />
         <Toaster position="bottom-right" />
       </div>
     );

@@ -12,6 +12,8 @@
 import { apiFetch } from "@/lib/api-client";
 import type {
   BriefResponse,
+  ChatHistoryResponse,
+  ChatTurnResponse,
   CreateInvestigationBody,
   CreateInvestigationResponse,
   InvestigationListItem,
@@ -60,5 +62,22 @@ export async function reRunInvestigation(id: string): Promise<CreateInvestigatio
   return apiFetch<CreateInvestigationResponse>(
     `/investigations/${encodeURIComponent(id)}/re-run`,
     { method: "POST" },
+  );
+}
+
+// Phase 6-lite chat (Plan 03-14).
+export async function getChatHistory(id: string): Promise<ChatHistoryResponse> {
+  return apiFetch<ChatHistoryResponse>(
+    `/investigations/${encodeURIComponent(id)}/chat`,
+  );
+}
+
+export async function postChatTurn(
+  id: string,
+  question: string,
+): Promise<ChatTurnResponse> {
+  return apiFetch<ChatTurnResponse>(
+    `/investigations/${encodeURIComponent(id)}/chat`,
+    { method: "POST", body: JSON.stringify({ question }) },
   );
 }

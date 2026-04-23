@@ -65,3 +65,25 @@ export interface BriefResponse {
   started_at: string;
   completed_at: string | null;
 }
+
+// Phase 6-lite chat (Plan 03-14).
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  cited_chunk_ids: string[];
+  created_at: string;
+}
+
+export interface ChatHistoryResponse {
+  investigation_id: string;
+  messages: ChatMessage[];
+}
+
+export interface ChatTurnBody {
+  question: string;
+}
+
+export interface ChatTurnResponse {
+  answer: string;
+  cited_chunk_ids: string[];
+}
