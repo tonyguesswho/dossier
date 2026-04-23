@@ -1,0 +1,50 @@
+# Keep image small and reproducible by excluding host-only artifacts.
+#
+# The Docker build context is `backend/` (see Makefile). Anything matched here
+# is not sent to the Docker daemon -> not in the image -> not in Lambda.
+
+# Virtualenvs (we use uv inside the image; host venv would leak macOS arm64
+# wheels into a linux/amd64 image)
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.tox/
+
+# Tests — Lambda never runs pytest; keep them out of the image
+tests/
+
+# Alembic versions are needed at runtime (the migrate Makefile target runs
+# alembic upgrade head); DO NOT exclude alembic/. But alembic's cache is fine
+# to drop.
+alembic/versions/__pycache__/
+
+# Secrets / local config — Lambda env vars come from Terraform, never from
+# baked-in .env files. Baking .env into an image is a STRIDE:Information
+# Disclosure waiting to happen.
+.env
+.env.*
+!.env.example
+
+# Eval artifacts — offline-only; not needed at runtime.
+eval/
+
+# Scripts that are dev-only (Phase 1 seed-eval etc.)
+scripts/
+
+# Editor / OS junk
+.vscode/
+.idea/
+.DS_Store
+
+# Planning docs are gitignored at repo root, but also belt-and-suspenders here
+.planning/
