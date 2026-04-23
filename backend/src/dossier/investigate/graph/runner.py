@@ -1,0 +1,217 @@
+"""investigate-lambda handler: runs the LangGraph investigation graph.
+
+This module is the entry point for the investigate-lambda container image.
+It is also importable locally for `DOSSIER_DISPATCH_MODE=local` dev runs
+(see api/routes/investigations.py _dispatch_pipeline).
+
+Security (T-03-03-01): If DOSSIER_AUTH_DEV_BYPASS is set AND
+AWS_LAMBDA_FUNCTION_NAME is set, this handler refuses to start — the bypass
+var must never leak to a deployed Lambda (03-CONTEXT.md security threat,
+dev-mode bypass leak). Enforced by _check_security_invariants() at handler
+entry so a misconfigured deploy fails at invocation, not silently.
+
+Lambda flush pattern (PLAT-04 / CLAUDE.md locked decision):
+    flush() + shutdown() + sleep(15) BEFORE handler returns.
+    Without sleep(15), ~30% of Langfuse traces are lost because the Lambda
+    execution context is frozen before the Langfuse SDK's background
+    HTTP sender drains. The sleep is implemented inside
+    observability.flush_and_shutdown(lambda_sleep=True).
+
+AsyncPostgresSaver pool config (03-RESEARCH.md Pattern 4, Pitfall 7.4):
+    prepare_threshold=0 CRITICAL: disables prepared statements on psycopg3
+    connections. Without this, RDS Proxy detects session-state changes
+    (DEALLOCATE ALL + prepared statement registration) and pins the
+    connection to this client, exhausting the t3.micro's ~85-connection
+    cap under Lambda concurrency.
+
+    autocommit=True is required by AsyncPostgresSaver.setup() for the
+    checkpoint table DDL (Pitfall 7.2).
+
+Pool lifecycle (03-RESEARCH.md Pattern 4):
+    Pool is created at module level so warm Lambda invocations reuse it.
+    open=False + await _pool.open() at first use avoids event-loop
+    initialization issues at module import time (module init runs outside
+    the asyncio loop on some Lambda runtimes).
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Module-level pool — created once per Lambda container lifetime.
+# Warm invocations share the same AsyncConnectionPool + AsyncPostgresSaver.
+_pool: Any = None
+_checkpointer: Any = None
+
+
+def _check_security_invariants() -> None:
+    """Refuse to start if dev-bypass is set in a deployed Lambda context.
+
+    T-03-03-01 mitigation: raising at handler entry makes the Lambda
+    invocation fail loudly, guaranteeing the misconfiguration is caught
+    on first call rather than silently bypassing auth.
+    """
+    if (
+        os.environ.get("DOSSIER_AUTH_DEV_BYPASS")
+        and os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
+    ):
+        raise RuntimeError(
+            "SECURITY: DOSSIER_AUTH_DEV_BYPASS must not be set when running as a "
+            "deployed Lambda (AWS_LAMBDA_FUNCTION_NAME is present). "
+            "Unset DOSSIER_AUTH_DEV_BYPASS before deploying."
+        )
+
+
+async def _get_checkpointer() -> Any:
+    """Lazy-init AsyncPostgresSaver backed by a psycopg3 pool with prepare_threshold=0.
+
+    Cached at module level so warm Lambda invocations reuse the same pool.
+    setup() is idempotent — safe to call once per cold start.
+    """
+    global _pool, _checkpointer
+
+    # Deferred imports keep this module importable in environments that
+    # don't have psycopg_pool / langgraph-checkpoint-postgres installed
+    # (e.g., the api-lambda image which only needs Mangum + FastAPI).
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+    from psycopg_pool import AsyncConnectionPool
+
+    if _pool is None:
+        database_url = os.environ["DATABASE_URL"]
+        _pool = AsyncConnectionPool(
+            conninfo=database_url,
+            max_size=2,  # single-invocation Lambda; 2 connections is enough
+            kwargs={
+                "autocommit": True,       # required by AsyncPostgresSaver.setup()
+                "prepare_threshold": 0,   # CRITICAL: prevents RDS Proxy pinning (Pitfall 7.4)
+            },
+            open=False,  # defer open() to runtime asyncio loop
+        )
+        await _pool.open()
+        _checkpointer = AsyncPostgresSaver(_pool)
+        await _checkpointer.setup()  # idempotent: creates LangGraph tables if not exist
+        logger.info("runner: AsyncPostgresSaver pool initialized")
+
+    return _checkpointer
+
+
+async def run_graph(investigation_id: str) -> None:
+    """Run the investigation graph for investigation_id.
+
+    Thread ID = investigation_id (one LangGraph thread per investigation).
+    Resumes from last checkpoint if a prior run was interrupted (ROADMAP SC#3).
+
+    Flush contract: even if graph.ainvoke() raises, the finally block flushes
+    Langfuse traces with the 15s Lambda sleep — trace loss on failure paths
+    is how bugs get missed in prod.
+    """
+    # Deferred imports so test environments can monkeypatch DATABASE_URL /
+    # Langfuse keys before these modules read os.environ at import time.
+    from sqlalchemy import text
+
+    from dossier.core.db import get_async_session
+    from dossier.investigate.graph import build_graph
+    from dossier.observability import flush_and_shutdown, get_langfuse_client
+
+    # strict=False: missing Langfuse creds degrade to no-op, do not crash the run.
+    langfuse_client = get_langfuse_client(strict=False)
+
+    # Read investigation row: company, context_hint, input_type, input_ref, langfuse_trace_id
+    async with get_async_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT company_name, context_hint, input_type, input_ref, langfuse_trace_id "
+                "FROM investigations WHERE id = :id"
+            ),
+            {"id": investigation_id},
+        )
+        row = result.fetchone()
+
+    if not row:
+        logger.error("runner: investigation_id=%s not found", investigation_id)
+        if langfuse_client:
+            flush_and_shutdown(langfuse_client, lambda_sleep=True)
+        return
+
+    company_name, context_hint, input_type, input_ref, _langfuse_trace_id = row
+    input_url = input_ref if input_type == "url" else None
+
+    checkpointer = await _get_checkpointer()
+    graph = build_graph(checkpointer=checkpointer)
+
+    initial_state = {
+        "investigation_id": str(investigation_id),
+        "company": company_name,
+        "context_hint": context_hint,
+        "input_url": input_url,
+        "reflection_count": 0,
+        "should_regather": False,
+        "targeted_sections": [],
+        "founder_candidates": [],
+        "retrieved_chunks": [],
+        "draft_claims": [],
+        "grounded_claims": [],
+    }
+
+    config: dict[str, Any] = {
+        "configurable": {
+            "thread_id": str(investigation_id),
+        },
+        # Plan 03-07 adds Langfuse CallbackHandler to config["callbacks"]
+        # with trace_context={"trace_id": langfuse_trace_id} to continue the
+        # trace started by api-lambda's POST /investigations handler.
+    }
+
+    try:
+        logger.info("runner: starting graph for investigation_id=%s", investigation_id)
+        await graph.ainvoke(initial_state, config=config)
+        logger.info("runner: graph completed for investigation_id=%s", investigation_id)
+    except Exception:
+        logger.exception("runner: graph failed for investigation_id=%s", investigation_id)
+        # Mark investigation as failed so the frontend poll surfaces the error.
+        # A separate session is intentional — the earlier session may be in
+        # an aborted transaction state after a mid-graph DB error.
+        try:
+            async with get_async_session() as session:
+                async with session.begin():
+                    await session.execute(
+                        text("UPDATE investigations SET status='failed' WHERE id = :id"),
+                        {"id": investigation_id},
+                    )
+        except Exception:
+            logger.exception(
+                "runner: failed to mark investigation_id=%s as failed", investigation_id
+            )
+        raise
+    finally:
+        # PLAT-04 / CLAUDE.md: flush Langfuse before Lambda returns.
+        # lambda_sleep=True adds the 15s drain window (STACK.md §2.6).
+        if langfuse_client:
+            flush_and_shutdown(langfuse_client, lambda_sleep=True)
+
+
+def handler(event: dict, context: Any) -> dict:
+    """AWS Lambda handler entry point for investigate-lambda.
+
+    Event shape: {"investigation_id": "<UUID>"}
+    Called via boto3 InvocationType='Event' (fire-and-forget) from api-lambda.
+
+    Returns a dict so CloudWatch shows the outcome; the caller (api-lambda's
+    async invoke) does not inspect the return value.
+    """
+    _check_security_invariants()
+
+    investigation_id = event.get("investigation_id")
+    if not investigation_id:
+        logger.error("runner.handler: missing investigation_id in event")
+        return {"statusCode": 400, "body": "missing investigation_id"}
+
+    asyncio.run(run_graph(str(investigation_id)))
+    return {"statusCode": 200, "body": "ok"}
+
+
+__all__ = ["handler", "run_graph"]
