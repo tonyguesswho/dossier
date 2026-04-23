@@ -19,11 +19,12 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# source_kind values that Phase 2 tools emit.
-# The DB CHECK constraint (migration 0001) permits more ('news', 'crunchbase',
-# 'deck_page') but Phase 2 only ships 'web', 'github', 'crawl'. Phase 3 widens
-# when NewsAPI + Crunchbase + deck upload land.
-ToolSourceKind = Literal["web", "github", "crawl"]
+# source_kind values emitted by the Phase 2 + Phase 3 tools.
+# Widened by Plan 03-04: NewsAPI ('news') and Crunchbase ('crunchbase') join
+# the Phase 2 trio ('web', 'github', 'crawl'). 'deck_page' still reserved for
+# Phase 5 pitch-deck ingestion. The sources.source_kind CHECK constraint in
+# migration 0001 already permits all five values — no DB change needed here.
+ToolSourceKind = Literal["web", "github", "crawl", "news", "crunchbase"]
 
 
 class ToolResult(BaseModel):
