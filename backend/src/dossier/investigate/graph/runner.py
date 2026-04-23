@@ -143,20 +143,6 @@ async def run_graph(investigation_id: str) -> None:
     checkpointer = await _get_checkpointer()
     graph = build_graph(checkpointer=checkpointer)
 
-    initial_state = {
-        "investigation_id": str(investigation_id),
-        "company": company_name,
-        "context_hint": context_hint,
-        "input_url": input_url,
-        "reflection_count": 0,
-        "should_regather": False,
-        "targeted_sections": [],
-        "founder_candidates": [],
-        "retrieved_chunks": [],
-        "draft_claims": [],
-        "grounded_claims": [],
-    }
-
     config: dict[str, Any] = {
         "configurable": {
             "thread_id": str(investigation_id),
@@ -166,9 +152,42 @@ async def run_graph(investigation_id: str) -> None:
         # trace started by api-lambda's POST /investigations handler.
     }
 
+    # Resume detection (ROADMAP SC#3 + test_checkpoint_resume.py):
+    # LangGraph's ainvoke() semantics — passing a dict re-runs from START with
+    # that input; passing None continues from the last checkpoint. On Lambda
+    # kill-and-replay we MUST pass None for the checkpoint resume to skip the
+    # already-completed nodes. Detecting an existing interrupted thread is
+    # done via aget_state: an unseen thread has next=() and created_at=None;
+    # an interrupted thread has a non-empty `next` tuple (the node that
+    # would have run next when the crash happened).
+    existing_state = await graph.aget_state(config)
+    is_resume = bool(existing_state.next) and existing_state.created_at is not None
+
+    if is_resume:
+        logger.info(
+            "runner: resuming investigation_id=%s from checkpoint (next=%s)",
+            investigation_id,
+            existing_state.next,
+        )
+        graph_input: Any = None
+    else:
+        graph_input = {
+            "investigation_id": str(investigation_id),
+            "company": company_name,
+            "context_hint": context_hint,
+            "input_url": input_url,
+            "reflection_count": 0,
+            "should_regather": False,
+            "targeted_sections": [],
+            "founder_candidates": [],
+            "retrieved_chunks": [],
+            "draft_claims": [],
+            "grounded_claims": [],
+        }
+
     try:
         logger.info("runner: starting graph for investigation_id=%s", investigation_id)
-        await graph.ainvoke(initial_state, config=config)
+        await graph.ainvoke(graph_input, config=config)
         logger.info("runner: graph completed for investigation_id=%s", investigation_id)
     except Exception:
         logger.exception("runner: graph failed for investigation_id=%s", investigation_id)
