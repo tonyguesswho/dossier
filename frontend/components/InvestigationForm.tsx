@@ -2,18 +2,24 @@
 
 // InvestigationForm — UI-SPEC §3 (form), §Copywriting Contract, §7c (guardrail error).
 //
-// Client-side validation is defense-in-depth; the authoritative validator is
-// FastAPI's CreateInvestigationBody (Plan 02-09) which enforces the same
-// substring rejections (D-27 / GUARD-03). Client-side failures short-circuit
-// the network call.
+// Plan 03-13 adds the "Pitch deck (PDF)" tab alongside the existing "Company
+// name / URL" tab. Both paths share the context_hint textarea, submit button,
+// and error copy. On PDF submit the file is POSTed multipart to
+// /api/investigations/upload; on text submit it's JSON to /api/investigations.
 //
-// Rejected alternatives (UI-SPEC §3):
+// Client-side validation is defense-in-depth; the authoritative validator is
+// FastAPI's CreateInvestigationBody / upload_deck_investigation (Plan 02-09 +
+// 03-13) which enforces the same substring rejections + size caps.
+//
+// Rejected alternatives (UI-SPEC §3 + Plan 03-13):
 //   - On-blur validation: distracting for a single-field form.
 //   - Force users to type "https://": friction; auto-prefix is UX-correct.
 //   - Show the raw API `detail` string on 422: may echo payload fragments
 //     (UI-SPEC §7c). Use our own copy.
-//   - react-hook-form: one input + one optional textarea doesn't justify the
-//     dependency surface; useState + Zod safeParse is enough.
+//   - Drag-and-drop PDF input: out of scope for demo-lite; <input type=file>
+//     is enough.
+//   - Separate deck-only component in a new route: adds routing + nav work
+//     without UX payoff; tabbing one form is the minimum viable affordance.
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -25,6 +31,10 @@ import { Textarea } from "@/components/ui/textarea";
 import type { CreateInvestigationBody, InvestigationKind } from "@/lib/types";
 
 const TLD_PATTERN = /\.(com|io|ai|co|net|org|app|dev)(\/|$)/i;
+
+// Mirror of backend DECK_MAX_BYTES — fail fast in the browser before the
+// Next.js proxy and FastAPI both 413 us.
+const DECK_MAX_BYTES = 10 * 1024 * 1024;
 
 // Mirror of schemas.py _REJECT_SUBSTRINGS; client-side match avoids a round-trip
 // on obvious garbage, but the authoritative filter is on the server.
@@ -48,6 +58,8 @@ const formSchema = z.object({
     .optional(),
 });
 
+type Mode = "text" | "deck";
+
 function detectKind(value: string): InvestigationKind {
   return value.includes("://") || TLD_PATTERN.test(value) ? "url" : "name";
 }
@@ -64,17 +76,48 @@ function checkInjection(value: string): boolean {
   return REJECT_SUBSTRINGS.some((bad) => v.includes(bad.toLowerCase()));
 }
 
+// Map a machine-readable `detail` from the backend to a user-facing string.
+// Centralized so both upload and text paths produce consistent copy.
+function detailToMessage(status: number, detail: string | null): string {
+  if (status === 429) {
+    return "You've reached the 10-investigation daily limit. Try again tomorrow.";
+  }
+  if (status === 413 || detail === "pdf_too_large") {
+    return "That PDF is larger than 10 MB. Please upload a smaller deck.";
+  }
+  if (status === 415 || detail === "pdf_required") {
+    return "Please upload a PDF file.";
+  }
+  if (detail === "pdf_no_text_extracted") {
+    return "We couldn't extract any text from that PDF. Scanned-image decks aren't supported yet.";
+  }
+  if (detail === "pdf_conversion_failed") {
+    return "That PDF couldn't be parsed. Try re-exporting it from your source tool.";
+  }
+  if (detail === "empty_or_too_small") {
+    return "That file looks empty. Please upload a real pitch deck.";
+  }
+  if (status === 422) {
+    return "This input was rejected. Please enter a real company name or URL.";
+  }
+  return "Something went wrong. Please try again in a moment.";
+}
+
 export function InvestigationForm() {
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>("text");
   const [value, setValue] = useState("");
   const [contextHint, setContextHint] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const switchMode = (next: Mode) => {
+    setMode(next);
     setError(null);
+  };
 
+  const submitText = async (): Promise<void> => {
     const parsed = formSchema.safeParse({
       value: value.trim(),
       context_hint: contextHint.trim() || undefined,
@@ -102,25 +145,76 @@ export function InvestigationForm() {
       context_hint: parsed.data.context_hint,
     };
 
+    const res = await fetch("/api/investigations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 202) {
+      const out = (await res.json()) as { id: string };
+      router.push(`/investigations/${out.id}`);
+      return;
+    }
+    let detail: string | null = null;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      /* non-JSON body */
+    }
+    setError(detailToMessage(res.status, detail));
+  };
+
+  const submitDeck = async (): Promise<void> => {
+    if (!file) {
+      setError("Please select a PDF file to upload.");
+      return;
+    }
+    if (file.size > DECK_MAX_BYTES) {
+      setError("That PDF is larger than 10 MB. Please upload a smaller deck.");
+      return;
+    }
+    if (file.type && file.type !== "application/pdf") {
+      setError("Please upload a PDF file.");
+      return;
+    }
+    if (contextHint && checkInjection(contextHint)) {
+      setError("This input was rejected. Please remove suspicious text from the hint.");
+      return;
+    }
+
+    const fd = new FormData();
+    fd.set("file", file);
+    if (contextHint.trim()) fd.set("context_hint", contextHint.trim());
+
+    const res = await fetch("/api/investigations/upload", {
+      method: "POST",
+      body: fd,
+    });
+    if (res.status === 202) {
+      const out = (await res.json()) as { id: string };
+      router.push(`/investigations/${out.id}`);
+      return;
+    }
+    let detail: string | null = null;
+    try {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      /* non-JSON body */
+    }
+    setError(detailToMessage(res.status, detail));
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
     setSubmitting(true);
     try {
-      const res = await fetch("/api/investigations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (res.status === 202) {
-        const out = (await res.json()) as { id: string };
-        router.push(`/investigations/${out.id}`);
-        return;
-      }
-      // Do NOT echo res detail into UI — UI-SPEC §7c bans echoing injection fragments.
-      if (res.status === 422) {
-        setError("This input was rejected. Please enter a real company name or URL.");
-      } else if (res.status === 429) {
-        setError("You've reached the 10-investigation daily limit. Try again tomorrow.");
+      if (mode === "text") {
+        await submitText();
       } else {
-        setError("Something went wrong. Please try again in a moment.");
+        await submitDeck();
       }
     } catch {
       setError("Something went wrong. Please try again in a moment.");
@@ -131,20 +225,73 @@ export function InvestigationForm() {
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-6">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="value" className="text-[15px] font-semibold">
-          Company name or URL
-        </label>
-        <Input
-          id="value"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Stripe  •  https://stripe.com  •  acme.com"
-          maxLength={200}
-          aria-describedby={error ? "form-error" : undefined}
-          autoFocus
-        />
+      <div
+        role="tablist"
+        aria-label="Investigation input type"
+        className="flex gap-1 rounded-md border border-border p-1 bg-muted/40"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "text"}
+          onClick={() => switchMode("text")}
+          className={`flex-1 h-9 rounded-sm text-[13px] font-medium transition-colors ${
+            mode === "text"
+              ? "bg-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Company name / URL
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "deck"}
+          onClick={() => switchMode("deck")}
+          className={`flex-1 h-9 rounded-sm text-[13px] font-medium transition-colors ${
+            mode === "deck"
+              ? "bg-background shadow-sm"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Pitch deck (PDF)
+        </button>
       </div>
+
+      {mode === "text" ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="value" className="text-[15px] font-semibold">
+            Company name or URL
+          </label>
+          <Input
+            id="value"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Stripe  •  https://stripe.com  •  acme.com"
+            maxLength={200}
+            aria-describedby={error ? "form-error" : undefined}
+            autoFocus
+          />
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="deck" className="text-[15px] font-semibold">
+            Pitch deck (PDF)
+          </label>
+          <Input
+            id="deck"
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            aria-describedby={error ? "form-error" : "deck-help"}
+            className="cursor-pointer file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1 file:text-[13px] file:font-medium"
+          />
+          <p id="deck-help" className="text-[13px] text-muted-foreground mt-1">
+            PDF, under 10 MB. Text is extracted via MarkItDown — image-only scans
+            aren&apos;t supported yet.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1">
         <label htmlFor="hint" className="text-[15px] font-semibold">
