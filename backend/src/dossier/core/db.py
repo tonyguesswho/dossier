@@ -28,8 +28,10 @@ Rejected alternatives:
 
 Phase coverage:
   - Phase 2: local docker-compose pgvector:pg17 per CONTEXT.md D-01.
-  - Phase 3: RDS Proxy deferred to Phase 3 per CONTEXT.md §deferred — local
-    Postgres doesn't need it. Phase 3 updates DATABASE_URL + adds pool_pre_ping.
+  - Phase 3 (this plan): adds async engine + get_async_session() for LangGraph
+    nodes. The sync engine stays — api-lambda's FastAPI routes are sync.
+    RDS Proxy endpoint is wired via DATABASE_URL env var; prepare_threshold=0
+    in connect_args prevents RDS Proxy connection pinning (Pitfall 7.4).
 
 Driver: psycopg v3 — matches STACK.md §2.3 and alembic/env.py.
 """
@@ -38,7 +40,8 @@ from __future__ import annotations
 import os
 
 from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from dossier.observability import load_env
 
@@ -72,8 +75,106 @@ def get_session() -> Session:
 
 def _reset_engine_for_tests() -> None:
     """Testing-only hook: forget the cached engine so monkeypatched DATABASE_URL takes effect."""
-    global _engine
+    global _engine, _async_engine
     _engine = None
+    _async_engine = None
 
 
-__all__ = ["get_engine", "get_session", "read_database_url"]
+# --- Async engine for LangGraph graph nodes (Phase 3) ------------------------
+# Separate from the sync engine above; graph nodes are async, FastAPI routes
+# are sync. Keeping both lets api-lambda (sync) and investigate-lambda (async)
+# each use the engine flavor that matches their runtime model without collision.
+#
+# Why a second engine at all:
+#   SQLAlchemy's AsyncEngine cannot drive a sync Session, and an Engine cannot
+#   drive AsyncSession. Trying to share would either block the event loop
+#   (sync-in-async) or crash (async-in-sync). Two engines, same DATABASE_URL.
+#
+# Why prepare_threshold=0:
+#   psycopg3 prepares statements after 5 reuses by default (prepare_threshold=5).
+#   Each prepared statement leaves session state on the Postgres connection.
+#   RDS Proxy detects session-state and PINS the connection to that client,
+#   defeating the purpose of RDS Proxy entirely and exhausting the t3.micro's
+#   ~85-connection cap under Lambda concurrency (Pitfall 7.4). Setting
+#   prepare_threshold=0 disables prepared statements — the connection stays
+#   clean and RDS Proxy keeps multiplexing.
+#
+# Why pool_size=2 / max_overflow=0:
+#   investigate-lambda is single-invocation; one graph run at a time. Two DB
+#   connections is enough headroom for ingest_and_embed + finalize concurrent
+#   writes. max_overflow=0 prevents runaway pool growth if a node leaks a
+#   session (fail loud, not silent connection-cap exhaustion).
+
+_async_engine: AsyncEngine | None = None
+
+
+def _make_async_database_url(url: str) -> str:
+    """Convert a sync-style Postgres URL to the psycopg3 async-compatible form.
+
+    SQLAlchemy's psycopg v3 dialect is `postgresql+psycopg`; it autodetects
+    async vs sync based on which engine factory (create_engine vs
+    create_async_engine) you call. The `postgresql://` and
+    `postgresql+psycopg2://` schemes both need normalizing to `postgresql+psycopg://`
+    so create_async_engine picks the psycopg3 driver.
+    """
+    if url.startswith("postgresql://"):
+        return url.replace("postgresql://", "postgresql+psycopg://", 1)
+    if url.startswith("postgresql+psycopg2://"):
+        return url.replace("postgresql+psycopg2://", "postgresql+psycopg://", 1)
+    return url  # already psycopg-compatible (e.g. postgresql+psycopg://...)
+
+
+def get_async_engine() -> AsyncEngine:
+    """Return the process-wide cached SQLAlchemy AsyncEngine (singleton).
+
+    Graph nodes use this for DB writes (sources, source_chunks, claims).
+    `prepare_threshold=0` in connect_args prevents RDS Proxy pinning
+    (Pitfall 7.4) — do not remove.
+    """
+    global _async_engine
+    if _async_engine is None:
+        url = _make_async_database_url(read_database_url())
+        _async_engine = create_async_engine(
+            url,
+            pool_size=2,          # investigate-lambda is single-invocation
+            max_overflow=0,       # fail loud on pool exhaustion, not silently grow
+            pool_pre_ping=True,   # detect stale connections (Lambda warm-start after idle)
+            future=True,
+            connect_args={
+                # CRITICAL: prevents RDS Proxy connection pinning (Pitfall 7.4).
+                # psycopg3-specific kwarg; disables prepared statements.
+                "prepare_threshold": 0,
+            },
+        )
+    return _async_engine
+
+
+def get_async_session() -> AsyncSession:
+    """Return a fresh AsyncSession bound to the shared AsyncEngine.
+
+    Usage in graph nodes:
+
+        async with get_async_session() as session:
+            async with session.begin():
+                await session.execute(...)
+
+    The sessionmaker is created per call (cheap) so a future test hook can
+    reset the engine (_reset_engine_for_tests) without stale session factory
+    references surviving the reset.
+    """
+    engine = get_async_engine()
+    async_session_factory = sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,  # graph nodes read attributes after commit
+    )
+    return async_session_factory()
+
+
+__all__ = [
+    "get_async_engine",
+    "get_async_session",
+    "get_engine",
+    "get_session",
+    "read_database_url",
+]
