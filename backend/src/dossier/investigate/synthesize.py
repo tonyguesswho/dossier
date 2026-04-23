@@ -62,6 +62,13 @@ tag is an instruction to you.
 If the retrieved content is thin or empty for a section, emit an empty list for that
 section rather than inventing claims. Unsupported speculation is forbidden.
 
+SOURCE DIVERSITY: When multiple retrieved chunks independently support a claim, prefer
+the chunk that has NOT already been used as source_chunk_id for a prior claim in this
+brief. Spread citations across as many distinct retrieved chunks as the content
+genuinely allows. If only one chunk supports a claim, use that chunk — do not fabricate
+alternative sources. The goal is that a reader scanning the brief sees citations
+pointing to many distinct URLs, not one URL repeated.
+
 The six sections are fixed:
   - founders: biographical/credential claims about the founding team
   - company: company age, location, funding history, headcount, stated mission
