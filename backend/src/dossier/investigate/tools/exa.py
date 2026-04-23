@@ -86,7 +86,7 @@ def _exa_call(query: str, num_results: int) -> list[dict[str, Any]]:
             query,
             num_results=num_results,
             text=True,
-            use_autoprompt=True,
+            type="deep",
         )
     except Exception as exc:  # noqa: BLE001 — exa-py raises various types
         raise ExaSearchError(f"Exa search failed: {exc}") from exc
