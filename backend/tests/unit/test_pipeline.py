@@ -44,6 +44,12 @@ class _FakeResult:
     def fetchone(self):
         return self._row
 
+    def all(self):
+        # Used by the chunk_id → url SELECT in run_investigation. Tests don't
+        # exercise the URL resolution, so an empty result is fine — claims
+        # render with `(source)` (no link) which is the intentional fallback.
+        return []
+
 
 class _FakeConn:
     def __init__(self, row) -> None:
@@ -205,7 +211,7 @@ def test_brief_to_markdown_renders_six_sections() -> None:
         risk_flags=[c],
         suggested_questions=[c],
     )
-    md = _brief_to_markdown(brief, [])
+    md = _brief_to_markdown(brief, {})
     for heading in (
         "## Founders",
         "## Company",
@@ -228,7 +234,7 @@ def test_brief_to_markdown_empty_section_renders_placeholder() -> None:
         risk_flags=[],
         suggested_questions=[],
     )
-    md = _brief_to_markdown(brief, [])
+    md = _brief_to_markdown(brief, {})
     assert "_No claims synthesized for this section._" in md
 
 

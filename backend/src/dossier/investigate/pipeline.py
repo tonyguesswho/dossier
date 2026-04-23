@@ -237,14 +237,21 @@ def _retrieve_all_sections(
     return list(seen.values())
 
 
-def _brief_to_markdown(brief: Brief, retrieved: list[RetrievedChunk]) -> str:
+def _brief_to_markdown(
+    brief: Brief, url_by_chunk: dict[str, str]
+) -> str:
     """Deterministic markdown render for Phase 2 (plain bullets per section).
 
     Phase 4 (BRIEF-02) replaces with inline citation popovers. Phase 2 is plain
-    bullets with a `([source](url))` suffix when the cited chunk is in the
-    retrieved list. Unknown source_chunk_ids render without a link.
+    bullets with a `([source](url))` suffix when the cited chunk's url is known.
+    Unknown source_chunk_ids render as `(source)` without a link.
+
+    url_by_chunk is a chunk_id → url map covering ALL source_chunks for the
+    investigation (not just the top-k retrieved set). Built by the caller via
+    a SQL JOIN so grounded claims whose chunk_id lives outside the retrieved
+    set still get a clickable link (this was the pre-Phase-4 Facebook-brief
+    bug where every claim rendered as literal `(source)` text).
     """
-    url_by_chunk: dict[str, str] = {str(c.chunk_id): c.url for c in retrieved}
 
     # Field name (plural risk_flags, suggested_questions) → display heading.
     SECTION_HEADINGS: list[tuple[str, str]] = [
@@ -397,7 +404,21 @@ def run_investigation(
                         ground_claims(investigation_id, brief, retrieved, engine=eng)
 
                     # Render + persist final brief
-                    brief_md = _brief_to_markdown(brief, retrieved)
+                    # Build full chunk_id → url map from DB so grounded claims
+                    # whose chunk_id lives outside `retrieved` (top-k subset)
+                    # still render a clickable ([source](url)) link.
+                    with eng.connect() as conn:
+                        url_rows = conn.execute(
+                            text(
+                                "SELECT sc.id::text AS chunk_id, s.url "
+                                "FROM source_chunks sc "
+                                "JOIN sources s ON sc.source_id = s.id "
+                                "WHERE s.investigation_id = :inv_id"
+                            ),
+                            {"inv_id": investigation_id},
+                        ).all()
+                    url_by_chunk = {r.chunk_id: r.url for r in url_rows}
+                    brief_md = _brief_to_markdown(brief, url_by_chunk)
                     _update_status(
                         eng,
                         investigation_id,
