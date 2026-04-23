@@ -163,7 +163,50 @@ class InvestigationBriefResponse(BaseModel):
     completed_at: Optional[datetime] = None
 
 
+# ---------------------------------------------------------------------------
+# Phase 6-lite chat (Plan 03-14)
+# ---------------------------------------------------------------------------
+
+class ChatMessageItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    role: Literal["user", "assistant"]
+    content: str
+    cited_chunk_ids: list[str] = []
+    created_at: datetime
+
+
+class ChatHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    investigation_id: UUID
+    messages: list[ChatMessageItem]
+
+
+class ChatTurnBody(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    question: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("question")
+    @classmethod
+    def _check(cls, v: str) -> str:
+        # Same substring denylist as CreateInvestigationBody — chat questions are
+        # another prompt-injection surface (Plan 03-08 classifier protects
+        # retrieved content at ingest, but the question itself also flows to
+        # Sonnet and must be filtered for the obvious attack phrases).
+        _check_injection_patterns(v)
+        return v
+
+
+class ChatTurnResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    answer: str
+    cited_chunk_ids: list[str]
+
+
 __all__ = [
+    "ChatHistoryResponse",
+    "ChatMessageItem",
+    "ChatTurnBody",
+    "ChatTurnResponse",
     "CreateInvestigationBody",
     "CreateInvestigationResponse",
     "InvestigationBriefResponse",

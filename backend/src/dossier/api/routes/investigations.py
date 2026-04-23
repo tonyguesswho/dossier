@@ -41,6 +41,10 @@ from sqlalchemy.engine import Engine
 
 from dossier.api.dependencies import require_clerk_user_id
 from dossier.api.schemas import (
+    ChatHistoryResponse,
+    ChatMessageItem,
+    ChatTurnBody,
+    ChatTurnResponse,
     CreateInvestigationBody,
     CreateInvestigationResponse,
     InvestigationBriefResponse,
@@ -431,6 +435,76 @@ def get_brief(
         started_at=row.started_at,
         completed_at=row.completed_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 6-lite chat (Plan 03-14 / CHAT-01 / CHAT-02)
+#
+# GET  /investigations/:id/chat → history (ordered by created_at ASC)
+# POST /investigations/:id/chat → one turn: retrieve top-k → Sonnet → persist
+#
+# Both routes reuse _load_user_investigation for authz (Clerk-user owns the
+# investigation or 404 — D-24 row scoping). The Sonnet call happens inline in
+# the POST handler (no BackgroundTasks) because the turn round-trip is the
+# user-visible latency; non-streaming JSON demo-lite per 03-14-PLAN.md.
+# ---------------------------------------------------------------------------
+
+@router.get("/{investigation_id}/chat", response_model=ChatHistoryResponse)
+def get_chat_history(
+    investigation_id: UUID,
+    clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
+) -> ChatHistoryResponse:
+    eng = _engine()
+    _load_user_investigation(eng, investigation_id, clerk_user_id)  # authz check
+    with eng.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT role, content, cited_chunk_ids, created_at "
+                "FROM chat_messages "
+                "WHERE investigation_id = :id "
+                "ORDER BY created_at ASC"
+            ),
+            {"id": str(investigation_id)},
+        ).all()
+    messages = [
+        ChatMessageItem(
+            role=r.role,
+            content=r.content,
+            cited_chunk_ids=r.cited_chunk_ids or [],
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+    return ChatHistoryResponse(investigation_id=investigation_id, messages=messages)
+
+
+@router.post("/{investigation_id}/chat", response_model=ChatTurnResponse)
+def post_chat_turn(
+    investigation_id: UUID,
+    body: ChatTurnBody,
+    clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
+) -> ChatTurnResponse:
+    # Deferred import — keeps the routes module cheap to load and mirrors the
+    # deck.pdf_to_markdown pattern (Plan 03-13). The chat module pulls openai
+    # SDK + pgvector retrieval on first use.
+    from dossier.investigate.chat import run_chat_turn  # noqa: PLC0415
+
+    eng = _engine()
+    row = _load_user_investigation(eng, investigation_id, clerk_user_id)
+
+    # Require the investigation to be complete — we only chat over grounded
+    # source chunks. `grounding`/`synthesizing`/`gathering` all map to the
+    # running state on the UI side, which gates the chat input (see
+    # frontend/components/ChatPane.tsx). Belt-and-suspenders here for direct
+    # API hits.
+    if row.status != "complete":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="not_ready",
+        )
+
+    answer, cited = run_chat_turn(investigation_id, body.question.strip(), engine=eng)
+    return ChatTurnResponse(answer=answer, cited_chunk_ids=cited)
 
 
 # ---------------------------------------------------------------------------
