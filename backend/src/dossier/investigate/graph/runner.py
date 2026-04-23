@@ -115,7 +115,11 @@ async def run_graph(investigation_id: str) -> None:
 
     from dossier.core.db import get_async_session
     from dossier.investigate.graph import build_graph
-    from dossier.observability import flush_and_shutdown, get_langfuse_client
+    from dossier.observability import (
+        flush_and_shutdown,
+        get_langchain_callback_handler,
+        get_langfuse_client,
+    )
 
     # strict=False: missing Langfuse creds degrade to no-op, do not crash the run.
     langfuse_client = get_langfuse_client(strict=False)
@@ -137,19 +141,41 @@ async def run_graph(investigation_id: str) -> None:
             flush_and_shutdown(langfuse_client, lambda_sleep=True)
         return
 
-    company_name, context_hint, input_type, input_ref, _langfuse_trace_id = row
+    company_name, context_hint, input_type, input_ref, langfuse_trace_id = row
     input_url = input_ref if input_type == "url" else None
 
     checkpointer = await _get_checkpointer()
     graph = build_graph(checkpointer=checkpointer)
 
+    # Wire Langfuse per-node spans (D-03, PLAT-04, ROADMAP SC#4).
+    # Attaches to the existing investigations.langfuse_trace_id so these
+    # node spans continue the trace that api-lambda started when the
+    # investigation row was created (Phase 2 plumbing, unchanged here).
+    #
+    # strict=False: a Langfuse outage (creds missing / SDK init failure /
+    # network down at startup) returns None; config["callbacks"] then
+    # becomes [] and the graph runs untraced rather than aborting.
+    # T-03-07-02 mitigation: tracing is never a hard dependency.
+    lf_handler = get_langchain_callback_handler(
+        trace_id=langfuse_trace_id,
+        session_id=str(investigation_id),
+        strict=False,
+    )
+
     config: dict[str, Any] = {
         "configurable": {
             "thread_id": str(investigation_id),
         },
-        # Plan 03-07 adds Langfuse CallbackHandler to config["callbacks"]
-        # with trace_context={"trace_id": langfuse_trace_id} to continue the
-        # trace started by api-lambda's POST /investigations handler.
+        # Empty list when lf_handler is None — LangGraph treats [] as "no
+        # callbacks" and proceeds normally (same code path as a successful
+        # handler that just happens to be no-op).
+        "callbacks": [lf_handler] if lf_handler is not None else [],
+        # langfuse_session_id is read by the Langfuse 4.x LangChain
+        # integration from run metadata (not from the CallbackHandler
+        # constructor, which in 4.x only accepts public_key + trace_context).
+        # This groups all per-investigation spans under one Langfuse
+        # Session in the UI, independent of trace_id continuity.
+        "metadata": {"langfuse_session_id": str(investigation_id)},
     }
 
     # Resume detection (ROADMAP SC#3 + test_checkpoint_resume.py):
