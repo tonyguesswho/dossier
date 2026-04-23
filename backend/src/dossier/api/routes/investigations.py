@@ -6,9 +6,12 @@ Every route:
   - Uses parameterized SQL via SQLAlchemy text() — no string concat.
   - Returns structured errors via HTTPException(detail=<machine-readable string>).
 
-POST dispatches pipeline via FastAPI BackgroundTasks per D-14. Phase 3 swaps this
-for boto3.client('lambda').invoke(InvocationType='Event', ...) — a ~2-line change
-confined to `_dispatch_pipeline` below.
+POST dispatches pipeline via one of two modes, selected by DOSSIER_DISPATCH_MODE:
+  - "local" (default): FastAPI BackgroundTasks + linear pipeline (D-14, Phase 2).
+  - "lambda" (deployed): boto3.client('lambda').invoke(InvocationType='Event', ...)
+    self-invokes this same Lambda container with {"investigation_id": ...};
+    lambda_handler.py routes that to runner.handler -> run_graph (Phase 3).
+Swap is confined to the dispatch helpers at the top of this file.
 
 Rate limit (D-27 / GUARD-03):
   - 10 investigations per Clerk user per rolling 24h window.
@@ -26,7 +29,9 @@ Rejected alternatives:
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -113,9 +118,84 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
     return row
 
 
-def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    """BackgroundTasks dispatch. Phase 3 swaps to boto3 lambda invoke."""
+def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
+    """Phase 2 inline dispatch — FastAPI BackgroundTasks runs the linear pipeline.
+
+    Used when DOSSIER_DISPATCH_MODE is unset or =local. Keeps `uv run uvicorn`
+    local-dev workflow working without AWS credentials or a deployed Lambda.
+    """
     background_tasks.add_task(run_investigation, investigation_id)
+
+
+def _dispatch_lambda(investigation_id: UUID) -> None:
+    """Phase 3 deployed dispatch — fire-and-forget self-invoke of the same Lambda.
+
+    The container answering this request also hosts the investigate handler;
+    InvocationType='Event' queues the invocation and returns immediately (the
+    POST /investigations handler stays under the Function URL's ~30s budget),
+    and the freshly invoked container wakes up with {"investigation_id": ...}
+    which lambda_handler.py routes to runner.handler -> run_graph.
+
+    Why boto3 + self-invoke rather than SQS/EventBridge/Step Functions:
+      - SQS would need a second Lambda (SQS trigger) + a queue resource +
+        IAM wiring. For 2-day demo, the Lambda quota of self-invokes is
+        fine (one per POST /investigations; rate-limited to 10/user/day
+        upstream via _check_rate_limit).
+      - EventBridge has higher latency (best-effort seconds) and adds a rule
+        resource per event pattern.
+      - Step Functions is overkill when the graph itself has resume semantics
+        via AsyncPostgresSaver checkpointing.
+
+    Env vars:
+      LAMBDA_FUNCTION_NAME — self-reference string injected by Terraform
+        (infra/terraform/lambda.tf:locals.composed_env_vars). Distinct from
+        AWS_LAMBDA_FUNCTION_NAME (AWS-injected at runtime), which runner.py
+        reads for its is-Lambda security check. Do not conflate.
+
+    boto3 is imported at call time so the unit-test suite (which never
+    exercises this path; DOSSIER_DISPATCH_MODE defaults to local) doesn't
+    pay the ~150ms boto3 import cost on every test run.
+    """
+    import boto3  # noqa: PLC0415 — intentional lazy import
+
+    function_name = os.environ.get("LAMBDA_FUNCTION_NAME")
+    if not function_name:
+        raise RuntimeError(
+            "LAMBDA_FUNCTION_NAME env var required when DOSSIER_DISPATCH_MODE=lambda"
+        )
+
+    client = boto3.client("lambda")  # region from AWS_REGION / IAM role default
+    client.invoke(
+        FunctionName=function_name,
+        InvocationType="Event",  # fire-and-forget: returns immediately, ~ms latency
+        Payload=json.dumps({"investigation_id": str(investigation_id)}).encode(),
+    )
+    logger.info(
+        "dispatch_lambda: queued investigation_id=%s on function=%s",
+        investigation_id,
+        function_name,
+    )
+
+
+def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
+    """Mode-selecting dispatch. Reads DOSSIER_DISPATCH_MODE at call time.
+
+    Modes:
+      - "local" (default): Phase 2 BackgroundTasks + linear pipeline
+      - "lambda": Phase 3 boto3 self-invoke of the investigate handler
+
+    Read at call time (not at import time) so flipping the env var in tests or
+    between local uvicorn runs takes effect without a process restart.
+    """
+    mode = os.environ.get("DOSSIER_DISPATCH_MODE", "local").lower()
+    if mode == "lambda":
+        _dispatch_lambda(investigation_id)
+    elif mode == "local":
+        _dispatch_local(background_tasks, investigation_id)
+    else:
+        raise RuntimeError(
+            f"unknown DOSSIER_DISPATCH_MODE={mode!r}; expected 'local' or 'lambda'"
+        )
 
 
 # ---------------------------------------------------------------------------
