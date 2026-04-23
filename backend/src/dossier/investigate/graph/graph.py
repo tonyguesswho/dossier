@@ -47,7 +47,7 @@ def build_graph(checkpointer=None):
     builder.add_node("exa_search", gather_fanout.run_exa)
     builder.add_node("newsapi_search", gather_fanout.run_newsapi)
     builder.add_node("firecrawl_crawl", gather_fanout.run_firecrawl)
-    builder.add_node("founder_extraction", founder_extraction.run)  # stub; Plan 03-05 fills
+    builder.add_node("founder_extraction", founder_extraction.run)  # Haiku 4.5 + FounderCandidates (Plan 03-05)
     builder.add_node("github_founder", gather_fanout.run_github_founder)
     builder.add_node("crunchbase_search", gather_fanout.run_crunchbase)
     builder.add_node("ingest_and_embed", ingest_and_embed.run)
