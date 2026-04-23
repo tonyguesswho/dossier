@@ -1,0 +1,30 @@
+# Copy to terraform.tfvars and fill in real values. terraform.tfvars is
+# gitignored; only this .example file is committed.
+
+project_name = "dossier"
+aws_region   = "us-east-1"
+
+# Leave container_image_uri at the variables.tf default for the FIRST apply.
+# After `docker push`, re-run with:
+#   terraform apply -var="container_image_uri=<account>.dkr.ecr.<region>.amazonaws.com/dossier-backend:latest"
+
+env_vars = {
+  # LLM gateway (OpenRouter is the sole LLM path per CLAUDE.md / PLAT-03)
+  OPENROUTER_API_KEY = "PASTE_HERE"
+  OPENAI_API_KEY     = "PASTE_HERE" # used for embeddings only (text-embedding-3-small)
+
+  # Observability
+  LANGFUSE_PUBLIC_KEY = "PASTE_HERE"
+  LANGFUSE_SECRET_KEY = "PASTE_HERE"
+  LANGFUSE_HOST       = "https://cloud.langfuse.com"
+
+  # Auth
+  CLERK_JWKS_URL = "https://<your-subdomain>.clerk.accounts.dev/.well-known/jwks.json"
+
+  # Investigation tools
+  EXA_API_KEY        = "PASTE_HERE"
+  GITHUB_TOKEN       = "PASTE_HERE"
+  FIRECRAWL_API_KEY  = "PASTE_HERE"
+  NEWSAPI_API_KEY    = "PASTE_HERE"
+  CRUNCHBASE_API_KEY = "PASTE_HERE" # optional — wrapper falls back to unauthed
+}

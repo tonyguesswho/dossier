@@ -1,0 +1,17 @@
+# Terraform state — contains secrets (RDS password), never commit
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Local Terraform dirs + crash logs
+.terraform/
+crash.log
+crash.*.log
+
+# Concrete tfvars may contain secrets (API keys); only the .example commits
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# NOTE: .terraform.lock.hcl IS committed on purpose (pins provider versions).
