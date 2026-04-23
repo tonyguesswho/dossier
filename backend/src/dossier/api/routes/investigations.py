@@ -35,7 +35,7 @@ import os
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -238,6 +238,96 @@ def create_investigation(
         )
 
     _dispatch_pipeline(background_tasks, investigation_id)
+
+    return CreateInvestigationResponse(id=investigation_id, status="queued")
+
+
+# ---------------------------------------------------------------------------
+# POST /investigations/upload (INPUT-03 — pitch-deck PDF, Phase 5-lite Plan 03-13)
+# ---------------------------------------------------------------------------
+
+# Demo-pressure tradeoffs:
+#   - 10 MB cap: prevents large-upload DoS on the single Lambda container while
+#     covering the ~95th percentile of real decks (most are 3–6 MB image-heavy).
+#   - application/octet-stream accepted in addition to application/pdf because
+#     some clients (curl without -H) send the generic MIME. Magic-byte check
+#     is inside MarkItDown — it raises on non-PDF content.
+#   - Dispatch is pinned to BackgroundTasks even when DOSSIER_DISPATCH_MODE=lambda
+#     for name/URL investigations, because the deck's markdown isn't persisted to
+#     S3. The self-invoke Lambda event would have to carry the full text as a
+#     payload (256 KB Event-invoke limit would bite), or re-fetch from DB. Both
+#     are out of scope; Plan 03-14 could wire it.
+
+DECK_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
+DECK_MIN_BYTES: int = 100  # below this it's not a real PDF
+DECK_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    {"application/pdf", "application/octet-stream"}
+)
+
+
+@router.post(
+    "/upload",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=CreateInvestigationResponse,
+)
+def upload_deck_investigation(
+    background_tasks: BackgroundTasks,
+    clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
+    file: Annotated[UploadFile, File(...)],
+    context_hint: Annotated[str | None, Form()] = None,
+) -> CreateInvestigationResponse:
+    """Accept a pitch-deck PDF, convert via MarkItDown, dispatch pipeline."""
+    # Deferred import — keeps the API module cheap to load; MarkItDown pulls in
+    # pdfminer + lxml on first use.
+    from dossier.investigate.deck import pdf_to_markdown, run_deck_investigation  # noqa: PLC0415
+
+    eng = _engine()
+
+    _check_rate_limit(eng, clerk_user_id)
+
+    # Validate MIME + read bytes
+    content_type = (file.content_type or "").lower()
+    if content_type not in DECK_ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail="pdf_required")
+
+    raw = file.file.read()
+    if not raw or len(raw) < DECK_MIN_BYTES:
+        raise HTTPException(status_code=400, detail="empty_or_too_small")
+    if len(raw) > DECK_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="pdf_too_large")
+
+    filename = file.filename or "deck.pdf"
+
+    try:
+        markdown = pdf_to_markdown(raw, filename)
+    except Exception as exc:  # noqa: BLE001 — surface-all conversion errors as 422
+        logger.exception("MarkItDown failed on uploaded PDF: %s", filename)
+        raise HTTPException(status_code=422, detail="pdf_conversion_failed") from exc
+
+    if not markdown.strip():
+        raise HTTPException(status_code=422, detail="pdf_no_text_extracted")
+
+    _ensure_user_exists(eng, clerk_user_id)
+
+    investigation_id = uuid4()
+    # input_ref encodes the filename (display value) plus optional hint.
+    # The existing _strip_hint / HINT_SEPARATOR convention keeps the LIB-01 list
+    # card showing just "deck.pdf" without the hint tail bleeding in.
+    input_ref = _build_input_ref(filename, context_hint)
+
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO investigations (id, user_id, status, input_type, input_ref) "
+                "VALUES (:id, :u, 'queued', 'deck', :v)"
+            ),
+            {"id": str(investigation_id), "u": clerk_user_id, "v": input_ref},
+        )
+
+    # Pinned to local dispatch; see the module-level note above.
+    background_tasks.add_task(
+        run_deck_investigation, investigation_id, markdown, filename
+    )
 
     return CreateInvestigationResponse(id=investigation_id, status="queued")
 
