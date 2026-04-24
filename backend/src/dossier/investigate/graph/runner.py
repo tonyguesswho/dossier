@@ -82,6 +82,12 @@ async def _get_checkpointer() -> Any:
 
     if _pool is None:
         database_url = os.environ["DATABASE_URL"]
+        # DATABASE_URL is written in SQLAlchemy driver-tagged form
+        # (postgresql+psycopg://...) because the sync code paths use SQLAlchemy.
+        # psycopg_pool wants a plain libpq DSN; strip the driver suffix or it
+        # treats the whole URL as a single malformed option.
+        if database_url.startswith("postgresql+psycopg://"):
+            database_url = "postgresql://" + database_url[len("postgresql+psycopg://"):]
         _pool = AsyncConnectionPool(
             conninfo=database_url,
             min_size=0,  # open connections lazily — Lambda warms up fast, not worth pre-opening
