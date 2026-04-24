@@ -194,12 +194,28 @@ def _gather(
     proceeds to ingest → synthesize; the synthesizer emits a thin brief.
     """
     results: list[ToolResult] = []
+    seen_urls: set[str] = set()
 
-    # Exa: primary web search.
-    try:
-        results.extend(exa_tool.search(company, num_results=8))
-    except Exception:  # noqa: BLE001 — fail-open per CONTEXT.md §Claude's Discretion
-        logger.warning("Exa stage failed (fail-open)", exc_info=True)
+    # Exa: three diverse queries so the corpus isn't dominated by the
+    # company's marketing pages. Broad name query surfaces the homepage /
+    # feature pages; founder-angled query catches bios / press; funding
+    # query catches TechCrunch / Crunchbase-style coverage. Empirically
+    # the founder query is what most often pulls a CEO name into a brief
+    # for seed-stage companies whose own site doesn't highlight the team.
+    exa_queries = [
+        company,
+        f"{company} founders CEO team",
+        f"{company} funding raised investors",
+    ]
+    for q in exa_queries:
+        try:
+            for r in exa_tool.search(q, num_results=5):
+                if r.url in seen_urls:
+                    continue
+                seen_urls.add(r.url)
+                results.append(r)
+        except Exception:  # noqa: BLE001 — fail-open per CONTEXT.md §Claude's Discretion
+            logger.warning("Exa stage failed for query=%r (fail-open)", q, exc_info=True)
 
     # GitHub: INVEST-02 — use company as the founder search term (simple Phase 2 heuristic).
     # Phase 3 will extract founder names from Exa results first, then call GitHub per-founder.
