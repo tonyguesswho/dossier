@@ -21,9 +21,9 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 // Match the Python-side cap so the frontend fails fast without streaming 50 MB
-// into Node then getting a 413 from FastAPI. 10 MB is the DECK_MAX_BYTES const
+// into Node then getting a 413 from FastAPI. 17 MB is the DECK_MAX_BYTES const
 // in backend/src/dossier/api/routes/investigations.py.
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 17 * 1024 * 1024;
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000";
 

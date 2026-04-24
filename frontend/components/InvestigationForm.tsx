@@ -34,7 +34,7 @@ const TLD_PATTERN = /\.(com|io|ai|co|net|org|app|dev)(\/|$)/i;
 
 // Mirror of backend DECK_MAX_BYTES — fail fast in the browser before the
 // Next.js proxy and FastAPI both 413 us.
-const DECK_MAX_BYTES = 10 * 1024 * 1024;
+const DECK_MAX_BYTES = 17 * 1024 * 1024;
 
 // Mirror of schemas.py _REJECT_SUBSTRINGS; client-side match avoids a round-trip
 // on obvious garbage, but the authoritative filter is on the server.
@@ -83,7 +83,7 @@ function detailToMessage(status: number, detail: string | null): string {
     return "You've reached the 10-investigation daily limit. Try again tomorrow.";
   }
   if (status === 413 || detail === "pdf_too_large") {
-    return "That PDF is larger than 10 MB. Please upload a smaller deck.";
+    return "That PDF is larger than 17 MB. Please upload a smaller deck.";
   }
   if (status === 415 || detail === "pdf_required") {
     return "Please upload a PDF file.";
@@ -171,7 +171,7 @@ export function InvestigationForm() {
       return;
     }
     if (file.size > DECK_MAX_BYTES) {
-      setError("That PDF is larger than 10 MB. Please upload a smaller deck.");
+      setError("That PDF is larger than 17 MB. Please upload a smaller deck.");
       return;
     }
     if (file.type && file.type !== "application/pdf") {
@@ -300,7 +300,7 @@ export function InvestigationForm() {
             </p>
           )}
           <p id="deck-help" className="text-[13px] text-muted-foreground mt-1">
-            PDF, under 10 MB. Text is extracted via MarkItDown — image-only scans
+            PDF, under 17 MB. Text is extracted via MarkItDown — image-only scans
             aren&apos;t supported yet.
           </p>
         </div>

@@ -251,8 +251,9 @@ def create_investigation(
 # ---------------------------------------------------------------------------
 
 # Demo-pressure tradeoffs:
-#   - 10 MB cap: prevents large-upload DoS on the single Lambda container while
-#     covering the ~95th percentile of real decks (most are 3–6 MB image-heavy).
+#   - 17 MB cap: prevents large-upload DoS on the single Lambda container while
+#     covering the ~98th percentile of real decks (most are 3–6 MB image-heavy;
+#     occasional 15 MB outliers with embedded rasters).
 #   - application/octet-stream accepted in addition to application/pdf because
 #     some clients (curl without -H) send the generic MIME. Magic-byte check
 #     is inside MarkItDown — it raises on non-PDF content.
@@ -262,7 +263,7 @@ def create_investigation(
 #     payload (256 KB Event-invoke limit would bite), or re-fetch from DB. Both
 #     are out of scope; Plan 03-14 could wire it.
 
-DECK_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MB
+DECK_MAX_BYTES: int = 17 * 1024 * 1024  # 17 MB
 DECK_MIN_BYTES: int = 100  # below this it's not a real PDF
 DECK_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
     {"application/pdf", "application/octet-stream"}
