@@ -168,26 +168,62 @@ def _load_url_by_chunk(conn, investigation_id: UUID) -> dict[str, str]:
 WEAK_RETRIEVAL_DISTANCE = 0.4
 
 
+def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
+    """Return a best-effort human subject for the investigation: the input_ref
+    with any `[hint: ...]` suffix stripped. Used to scope widen-search queries
+    so a chat turn like 'where is the headquarters' doesn't pull in unrelated
+    companies' pages. Returns None if the row is missing.
+    """
+    with eng.connect() as conn:
+        row = conn.execute(
+            text("SELECT input_ref FROM investigations WHERE id = :id"),
+            {"id": str(investigation_id)},
+        ).fetchone()
+    if row is None or not row[0]:
+        return None
+    subject = row[0]
+    if " [hint:" in subject:
+        subject = subject.split(" [hint:", 1)[0].strip()
+    return subject or None
+
+
 def _widen_search(
     investigation_id: UUID,
     question: str,
     eng: Engine,
 ) -> int:
-    """Fresh Exa search for the question; ingest results; return count ingested.
+    """Fresh Exa search for the question (subject-scoped); ingest results.
 
-    Returns 0 and logs if Exa is unavailable / returns nothing / ingest errors.
-    Never raises — chat turn must still complete with whatever the original
-    retrieval produced.
+    Returns count ingested. Returns 0 and logs if Exa is unavailable /
+    returns nothing / ingest errors. Never raises — chat turn must still
+    complete with whatever the original retrieval produced.
+
+    Query scoping is CRITICAL: a generic question like "where is the
+    headquarters" embedded alone matches headquarters pages for any famous
+    company (Microsoft, General Mills, etc.). We always prefix with the
+    investigation's subject so Exa returns pages scoped to THIS company.
+    Without this guard every weak chat turn poisons the corpus permanently.
     """
     try:
         from dossier.investigate.tools import exa as exa_tool
         from dossier.investigate.ingest import ingest_tool_results
+        from dossier.investigate.tools.types import ToolResult
     except Exception:
         logger.exception("chat: widen-search imports failed")
         return 0
 
+    subject = _investigation_subject(eng, investigation_id)
+    if not subject:
+        # No subject to scope against — refuse to widen rather than pollute
+        # the corpus with unrelated companies' results.
+        logger.warning("chat: widen-search skipped — no investigation subject found")
+        return 0
+
+    scoped_query = f"{subject}: {question}"
+    logger.info("chat: widen-search scoped query=%r", scoped_query[:120])
+
     try:
-        new_results = exa_tool.search(question, num_results=3)
+        new_results = exa_tool.search(scoped_query, num_results=3)
     except Exception:
         logger.warning("chat: widen Exa call failed; continuing with existing corpus", exc_info=True)
         return 0
@@ -195,13 +231,33 @@ def _widen_search(
     if not new_results:
         return 0
 
+    # Tag each result's metadata so future audits can identify widen-sourced
+    # chunks (and a cleanup query can prune corpus pollution if the query was
+    # off-target despite the subject scoping).
+    tagged_results = [
+        ToolResult(
+            url=r.url,
+            source_kind=r.source_kind,
+            text=r.text,
+            title=r.title,
+            fetched_at=r.fetched_at,
+            raw_metadata={
+                **r.raw_metadata,
+                "widened_from_chat": True,
+                "widen_subject": subject,
+                "widen_question": question[:200],
+            },
+        )
+        for r in new_results
+    ]
+
     try:
-        ingest_tool_results(investigation_id, new_results, engine=eng)
+        ingest_tool_results(investigation_id, tagged_results, engine=eng)
     except Exception:
         logger.exception("chat: widen-ingest failed; continuing with existing corpus")
         return 0
 
-    return len(new_results)
+    return len(tagged_results)
 
 
 def run_chat_turn(
