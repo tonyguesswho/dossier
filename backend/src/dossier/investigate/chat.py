@@ -69,7 +69,8 @@ class ChatAnswer(BaseModel):
     cited_chunk_ids: list[str]
 
 
-_SYSTEM_PROMPT = """You are an analyst answering a VC's question about a company.
+_SYSTEM_PROMPT_TEMPLATE = """You are an analyst answering a VC's question about \
+{subject_line}.
 
 You MUST answer using ONLY the provided source chunks, which are marked
 `[S:<chunk_id>]`. For every factual claim in your answer, cite at least one
@@ -77,8 +78,33 @@ chunk inline using the exact pattern `[S:<chunk_id>]`. If the chunks don't
 contain information to answer the question, say so plainly — DO NOT invent
 facts or cite chunks you didn't use.
 
+SUBJECT DISCIPLINE: The user is asking about {subject}. If a source chunk is
+clearly about a DIFFERENT company or entity (e.g., a chunk about Microsoft's
+HQ when the subject is Andela, or a chunk about Flutterwave's team when the
+subject is Andela), you MUST ignore that chunk and NOT cite it — even if it
+appears semantically relevant to the question text. If this filtering leaves
+no usable chunks, answer: "The provided sources don't contain information
+about that specific aspect of {subject}." Do not answer off-subject.
+
 Return `answer_text` (the prose answer with inline [S:xxx] markers) and
 `cited_chunk_ids` (the unique chunk_ids you actually referenced)."""
+
+
+def _build_system_prompt(subject: str | None) -> str:
+    """Fill the system prompt template with the investigation's subject.
+
+    Falls back to a generic line when subject is unknown (investigation row
+    missing, test fixture, etc.) — still useful but loses the off-topic
+    filtering guard.
+    """
+    if subject:
+        subject_line = f"{subject}"
+    else:
+        subject_line = "a company"
+    return _SYSTEM_PROMPT_TEMPLATE.format(
+        subject=subject or "this company",
+        subject_line=subject_line,
+    )
 
 
 def _build_user_prompt(question: str, retrieved: list[RetrievedChunk]) -> str:
@@ -99,9 +125,16 @@ def answer_with_citations(
     question: str,
     retrieved: list[RetrievedChunk],
     *,
+    subject: str | None = None,
     client: Any = None,
 ) -> ChatAnswer:
     """Call Sonnet with retrieved chunks; return structured answer.
+
+    `subject` is the investigation's subject (company name / URL) — when
+    provided, the system prompt instructs the LLM to IGNORE any chunk that's
+    clearly about a different company. This is the final defense against
+    corpus pollution from widen-search drift (e.g. an "is Iyin still at the
+    company" question widening into Flutterwave pages).
 
     Fail-open on parsed=None (vs. synthesize.py which raises PipelineError) —
     a malformed chat response should degrade to a visible "I couldn't generate
@@ -111,7 +144,7 @@ def answer_with_citations(
     completion = active_client.beta.chat.completions.parse(
         model=STRONG_MODEL_ID,
         messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": _build_system_prompt(subject)},
             {"role": "user", "content": _build_user_prompt(question, retrieved)},
         ],
         response_format=ChatAnswer,
@@ -283,6 +316,10 @@ def run_chat_turn(
     """
     eng = engine if engine is not None else get_engine()
 
+    # Resolve the subject once up-front — used by both widen-search scoping
+    # and the synthesizer's subject-discipline guard.
+    subject = _investigation_subject(eng, investigation_id)
+
     retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
     top_distance = retrieved[0].distance if retrieved else None
     is_weak = (not retrieved) or (top_distance is not None and top_distance > WEAK_RETRIEVAL_DISTANCE)
@@ -304,7 +341,9 @@ def run_chat_turn(
         _persist_turn_pair(eng, investigation_id, question, empty_reply, [])
         return empty_reply, []
 
-    answer = answer_with_citations(question, retrieved, client=client)
+    answer = answer_with_citations(
+        question, retrieved, subject=subject, client=client
+    )
 
     with eng.connect() as conn:
         url_by_chunk = _load_url_by_chunk(conn, investigation_id)
