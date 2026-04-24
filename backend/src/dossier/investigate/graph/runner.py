@@ -137,7 +137,7 @@ async def run_graph(investigation_id: str) -> None:
     # or `context_hint` columns — those are encoded inside `input_ref` via
     # HINT_SEPARATOR (Phase 2 convention from pipeline.py / Plan 02-09).
     # We parse them out here using the same separator.
-    from dossier.investigate.pipeline import HINT_SEPARATOR  # noqa: PLC0415
+    from dossier.investigate.render import HINT_SEPARATOR  # noqa: PLC0415
     async with get_async_session() as session:
         result = await session.execute(
             text(
@@ -218,6 +218,7 @@ async def run_graph(investigation_id: str) -> None:
             "company": company_name,
             "context_hint": context_hint,
             "input_url": input_url,
+            "input_type": input_type,
             "reflection_count": 0,
             "should_regather": False,
             "targeted_sections": [],

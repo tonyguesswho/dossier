@@ -212,7 +212,7 @@ def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
     through with the hint tail still attached. Fixed by using the real
     constant via a deferred import.
     """
-    from dossier.investigate.pipeline import HINT_SEPARATOR  # noqa: PLC0415
+    from dossier.investigate.render import HINT_SEPARATOR  # noqa: PLC0415
     with eng.connect() as conn:
         row = conn.execute(
             text("SELECT input_ref FROM investigations WHERE id = :id"),

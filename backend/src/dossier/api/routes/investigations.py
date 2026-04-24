@@ -57,7 +57,7 @@ from dossier.api.schemas import (
     SourceListItem,
 )
 from dossier.core.db import get_engine
-from dossier.investigate.pipeline import HINT_SEPARATOR, run_investigation
+from dossier.investigate.render import HINT_SEPARATOR
 
 logger = logging.getLogger(__name__)
 

@@ -130,22 +130,27 @@ def run_deck_investigation(
     *,
     engine: Engine | None = None,
 ) -> None:
-    """Run the investigation pipeline with a pitch deck as the sole source.
+    """Run the investigation graph with a pitch deck as the sole source.
 
     Flow:
-      1. Synthesize one ToolResult wrapping the uploaded markdown.
-      2. ingest_tool_results → chunk + embed + INSERT sources + source_chunks.
-      3. Delegate to run_investigation, which handles:
-         gather (noop/empty for decks) → ingest (empty list, no-op) →
-         retrieve (finds pre-seeded deck chunks) → synthesize → ground →
-         render brief_markdown → status=complete.
+      1. Pre-ingest the uploaded markdown as a synthetic ToolResult →
+         source_chunks populated BEFORE the graph runs.
+      2. Invoke `run_graph` (the canonical path). The graph reads
+         input_type='deck' from the investigations row and routes via
+         gather_fanout's deck short-circuit — stage1_router + stage2_router
+         return empty Send lists, so no web tools fire and the corpus
+         stays exactly as the deck provided.
+      3. Retrieve → synthesize → ground → finalize (brief_markdown +
+         scorecard) happens inside the graph.
 
-    On ingest failure the investigation is marked failed and we return early;
-    run_investigation is never called with a half-populated chunk table.
+    On pre-ingest failure the investigation is marked failed and we return
+    early; run_graph is never called with a half-populated chunk table.
     """
-    # Deferred import of pipeline so test harness can monkeypatch freely and
-    # to match the pipeline module's own deferred-langfuse import style.
-    from dossier.investigate.pipeline import run_investigation  # noqa: PLC0415
+    # Deferred import to avoid importing the graph (and its LangGraph/
+    # psycopg_pool deps) on every deck upload path — only the background
+    # task worker needs them.
+    import asyncio  # noqa: PLC0415
+    from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
 
     eng = engine if engine is not None else get_engine()
 
@@ -175,7 +180,7 @@ def run_deck_investigation(
             )
         return
 
-    run_investigation(investigation_id, engine=eng)
+    asyncio.run(run_graph(str(investigation_id)))
 
 
 __all__ = ["pdf_to_markdown", "run_deck_investigation"]

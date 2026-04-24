@@ -113,7 +113,7 @@ async def run(state: DossierState) -> dict:
     # mocks in unit tests, transient DB blip), render with an empty map so
     # claims still get section headers and `(source)` fallback markers rather
     # than failing the whole pipeline at the very last step.
-    from dossier.investigate.pipeline import _brief_to_markdown  # noqa: PLC0415
+    from dossier.investigate.render import brief_to_markdown as _brief_to_markdown  # noqa: PLC0415
     url_by_chunk: dict[str, str] = {}
     try:
         async with get_async_session() as session:

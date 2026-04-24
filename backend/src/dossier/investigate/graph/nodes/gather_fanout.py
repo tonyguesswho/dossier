@@ -76,7 +76,18 @@ async def run(state: DossierState) -> dict:
 
 
 def stage1_router(state: DossierState) -> list[Send]:
-    """Route parallel Stage-1 branches: Exa + NewsAPI + Firecrawl (if URL)."""
+    """Route parallel Stage-1 branches: Exa + NewsAPI + Firecrawl (if URL).
+
+    Deck path (input_type='deck'): skip all web tools. The upload handler
+    has already pre-ingested the extracted markdown as source_chunks, so
+    hitting Exa/Firecrawl with a filename-derived 'company' would just
+    pollute the corpus with unrelated pages. Return an empty Send list —
+    LangGraph proceeds to the next fanout boundary with the pre-seeded
+    corpus intact.
+    """
+    if state.get("input_type") == "deck":
+        logger.info("gather_fanout: skipping stage1 for deck-input investigation")
+        return []
     sends = [
         Send("exa_search", state),
         Send("newsapi_search", state),
@@ -87,7 +98,14 @@ def stage1_router(state: DossierState) -> list[Send]:
 
 
 def stage2_router(state: DossierState) -> list[Send]:
-    """Route Stage-2 branches after founder extraction: GitHub × N + Crunchbase."""
+    """Route Stage-2 branches after founder extraction: GitHub × N + Crunchbase.
+
+    Deck path: same rationale as stage1_router — the deck is the corpus,
+    no web tools fire.
+    """
+    if state.get("input_type") == "deck":
+        logger.info("gather_fanout: skipping stage2 for deck-input investigation")
+        return []
     sends = [Send("crunchbase_search", state)]
     for founder in state.get("founder_candidates", [])[:5]:  # D-05: cap at 5
         sends.append(Send("github_founder", {**state, "current_founder": founder}))

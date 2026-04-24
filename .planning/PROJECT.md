@@ -16,7 +16,20 @@ This is the capstone for an AI Engineering bootcamp. The product is designed to 
 
 <!-- Shipped and confirmed valuable. -->
 
-(None yet — ship to validate)
+**Phase 1 (eval harness + skeleton)**
+- [x] Deterministic `citation_precision()` scorer with 7 pytest cases (Pitfall 4.5 defense)
+- [x] 10-company eval set (6 train / 4 holdout / 3 gold-briefed) in `eval_items`
+- [x] Langfuse observability wired; trace confirmed in UI
+
+**Phase 2 (single-pass RAG pipeline) — validated 2026-04-23**
+- [x] Signed-in user submits company name/URL → 2–4 min later a 6-section Brief renders
+- [x] Every retrieved chunk stored with `(url, char_start, char_end, quoted_text, embedding)` + `embedding_model` stamped in JSONB metadata (Pitfall 2.2 defense)
+- [x] Status polling resolves without page refresh (TanStack Query, refetchInterval=2000)
+- [x] Library: list / rename / delete / re-run (re_run_of FK) scoped to Clerk user
+- [x] Copy-as-markdown + PDF-via-print (share-link deferred to Phase 6 per D-10)
+- [x] All 22 Phase 2 requirement IDs accounted for; 19 marked complete; 3 reassigned (BRIEF-05→P4, BRIEF-08→P6, PLAT-01→P3)
+
+(Phase 2 live-stack UAT pending — see `.planning/phases/02-single-pass-rag-pipeline/02-HUMAN-UAT.md`)
 
 ### Active
 
@@ -49,6 +62,13 @@ This is the capstone for an AI Engineering bootcamp. The product is designed to 
 - [ ] Investigations are scoped per user (multi-tenant)
 - [ ] Langfuse traces every investigation and chat turn
 - [ ] System deploys to AWS (S3, Lambda, RDS+pgvector) with Next.js frontend on Vercel
+
+**Security & guardrails** (absorbed from prior draft `archive/dossier_capstone_plan.md`)
+- [ ] Retrieved content is sandboxed with delimited tokens before reaching any LLM — retrieved text is data, not instructions
+- [ ] An injection classifier quarantines and logs any retrieved chunk that attempts prompt injection
+- [ ] Input validation + per-user rate limiting on investigation kickoff
+- [ ] PII redaction on pitch-deck and retrieved content before Langfuse or persisted logs
+- [ ] Public "See it under attack" demo affordance on the app — pre-loaded injection-laced company; user watches the classifier quarantine chunks in real time
 
 ### Out of Scope
 
@@ -126,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-21 after initialization*
+*Last updated: 2026-04-23 after Phase 2 completion*

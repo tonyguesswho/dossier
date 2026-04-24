@@ -16,6 +16,7 @@ class PipelineError(RuntimeError):
       - Required env var is missing at runtime (OPENROUTER_API_KEY).
       - All three search tools returned zero results (fail-closed variant).
 
-    Caught by `dossier.investigate.pipeline.run_investigation` which writes
-    `investigations.status = 'failed'` and `investigations.error = str(exc)`.
+    Caught by the graph's finalize node (or by run_graph's outer try/except)
+    which writes `investigations.status = 'failed'` and
+    `investigations.error = str(exc)`.
     """

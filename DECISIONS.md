@@ -306,12 +306,30 @@ the trade only once you have real scale.
 
 ---
 
-## 12. Two pipelines (`pipeline.py` linear + graph path) — known tech debt
+## 12. One pipeline: the graph. `pipeline.py` retired (day 14 cleanup)
 
-**What:** Phase 2 shipped `pipeline.py` (one Python function, sequential
-gather → ingest → retrieve → synth → ground → render). Phase 3 added the
-LangGraph graph. Both live in-tree; `DOSSIER_DISPATCH_MODE` toggles
-between them (`local` → pipeline.py, `lambda` → graph via runner.py).
+**What:** Every investigation path — text, URL, pitch deck — runs through
+the LangGraph graph via `runner.run_graph`. Local dev
+(`DOSSIER_DISPATCH_MODE=local`) wraps `run_graph` in a sync adapter for
+FastAPI's BackgroundTasks; AWS deployment
+(`DOSSIER_DISPATCH_MODE=lambda`) self-invokes the Lambda container with
+a `{"investigation_id": ...}` event that dispatches to the same
+`runner.handler`. Deck uploads pre-ingest the extracted markdown as a
+synthetic `ToolResult`, then invoke `run_graph` — `gather_fanout`'s
+`stage1_router` and `stage2_router` short-circuit on `input_type='deck'`
+so the deck corpus stays uncontaminated by web tools.
+
+Brief-rendering helpers and `HINT_SEPARATOR` now live in
+`backend/src/dossier/investigate/render.py` (neutral module, no
+callers' legacy baggage).
+
+**History:** Phase 2 shipped `pipeline.py` (one Python function,
+sequential gather → ingest → retrieve → synth → ground → render) as the
+known-good baseline. Phase 3 added the LangGraph graph. Both lived
+in-tree for demo safety: if the graph broke late in the build, the
+linear path was a working fallback. That safety was load-bearing — it
+caught one contract-drift bug on deploy day (graph's `finalize` didn't
+persist `brief_markdown`).
 
 **Rejected alternatives:**
 - Delete `pipeline.py` the moment the graph shipped — higher risk during
@@ -321,29 +339,23 @@ between them (`local` → pipeline.py, `lambda` → graph via runner.py).
   graph in Phase 2, which was explicitly rejected to keep Phase 2's
   scope small (CLAUDE.md Phase-order rationale).
 
-**Why this won (and why it's bad):** Two implementations kept our Phase 2
-demo-worthy while we built Phase 3. Contract drift caught us once — the
-graph's `finalize` node didn't persist `brief_markdown` because that was
-pipeline-only behavior, not documented on the graph side. Cost: one
-hotfix commit on deploy day.
+**Why the cleanup landed:** An extra 2 days on the capstone timeline
+made the risk budget for consolidation affordable. The retirement
+sequence was: (1) switch `_dispatch_local` to call `run_graph`, (2)
+teach `gather_fanout` to skip on `input_type='deck'`, (3) rewire
+`run_deck_investigation` to `run_graph`, (4) move `HINT_SEPARATOR` +
+`brief_to_markdown` to a neutral `render.py` module, (5) delete
+`pipeline.py` + `test_pipeline.py` + `test_pipeline_smoke.py`. 180 →
+164 unit tests (the 16 lost tested deleted code).
 
-**Current state (post-capstone day 14 cleanup):** text + URL investigations
-now route through the graph in BOTH local dev and AWS — `_dispatch_local`
-wraps `run_graph` in a sync adapter and hands it to FastAPI's
-BackgroundTasks. Deck (PDF upload) investigations remain on `pipeline.py`
-because the graph's `gather_fanout` doesn't yet know to skip when the
-corpus is pre-populated by the upload handler. Deleting `pipeline.py`
-entirely is a few hours of work to teach `gather_fanout` that input_type
-= 'deck' means 'skip'. Deferred, but `pipeline.py` is now a deck-only
-dispatcher rather than a parallel implementation.
-
-**Where to push back:** The intermediate state ("graph for text/URL,
-pipeline for decks") is still two-pipeline territory, just with a
-smaller surface. A reviewer could legitimately argue the deck path
-should have been rewired in the same commit. Fair critique; the counter
-is deploy-day risk: the deck path is newer (Phase 5-lite) and rewiring
-it for the graph while also confirming AWS stability isn't a 3-hour
-job.
+**Where to push back:** The consolidation test surface is thinner —
+`pipeline.run_investigation` had dedicated integration tests that no
+longer exist. The graph has unit tests per node but no equivalent
+end-to-end integration test against real pgvector. A reviewer could
+argue that test surface should have been re-ported before the cleanup,
+not after. Fair critique; the live AWS smoke-test (a real investigation
+that produces a citation-precision=100% scorecard) is the current
+end-to-end evidence.
 
 ---
 

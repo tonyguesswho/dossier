@@ -81,6 +81,7 @@ class DossierState(TypedDict):
     company: str
     context_hint: str | None
     input_url: str | None  # present only for 'url' input_type; triggers Firecrawl in Stage 1
+    input_type: str  # 'name' | 'url' | 'deck' — gather_fanout short-circuits on 'deck'
 
     # --- Reflection control (D-02) ---
     reflection_count: int  # incremented by verifier; capped at 2
