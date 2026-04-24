@@ -45,6 +45,7 @@ dependencies = [
     # AWS (Phase 3+)
     "boto3>=1.40.0",
     "markitdown[pdf]>=0.1.5",
+    "langchain>=1.2.15",
 ]
 
 [dependency-groups]
