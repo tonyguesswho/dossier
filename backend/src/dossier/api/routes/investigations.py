@@ -52,6 +52,7 @@ from dossier.api.schemas import (
     InvestigationListResponse,
     InvestigationStatusResponse,
     ReRunResponse,
+    ScorecardResponse,
     RenameInvestigationBody,
     SourceListItem,
 )
@@ -465,6 +466,12 @@ def get_brief(
             {"id": str(investigation_id)},
         ).fetchall()
 
+    # Compute scorecard on the fly — same logic as `python -m dossier.eval.report`
+    # but scoped to this one investigation. Cheap (1 joined SELECT + ~30 Python
+    # substring checks). Returns None on failed/incomplete investigations so
+    # the UI can suppress the badge when there's no brief yet.
+    scorecard = _compute_scorecard(eng, investigation_id) if row.status == "complete" else None
+
     return InvestigationBriefResponse(
         id=row.id,
         display_name=_strip_hint(row.input_ref or ""),
@@ -473,6 +480,55 @@ def get_brief(
         sources=[SourceListItem(id=s.id, url=s.url, source_kind=s.source_kind) for s in sources],
         started_at=row.started_at,
         completed_at=row.completed_at,
+        scorecard=scorecard,
+    )
+
+
+def _compute_scorecard(eng: Engine, investigation_id: UUID) -> ScorecardResponse | None:
+    """Read claims + their grounded chunks; compute citation_precision + grounding_rate.
+
+    Mirrors dossier.eval.report._fetch_claims_and_corpus' offset translation
+    (claims.grounded_span_start/end are SOURCE-absolute; chunk.text is local).
+    Returns None if no claims exist (degenerate) — UI then hides the badge.
+    """
+    # Deferred import — eval.scorer pulls in tiktoken etc. which we don't want
+    # on every /brief read if it's a no-claims investigation.
+    from dossier.eval.scorer import normalize  # noqa: PLC0415
+    with eng.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT c.claim_text, c.grounded_source_chunk_id::text AS chunk_id, "
+                "       c.grounded_span_start, c.grounded_span_end, "
+                "       sc.text AS chunk_text, sc.char_start AS chunk_char_start "
+                "FROM claims c "
+                "LEFT JOIN source_chunks sc ON c.grounded_source_chunk_id = sc.id "
+                "WHERE c.investigation_id = :iid"
+            ),
+            {"iid": str(investigation_id)},
+        ).all()
+    if not rows:
+        return None
+    total = len(rows)
+    grounded = 0
+    hits = 0
+    for r in rows:
+        if r.chunk_id and r.chunk_text is not None and r.grounded_span_start is not None:
+            grounded += 1
+            local_start = r.grounded_span_start - (r.chunk_char_start or 0)
+            local_end = r.grounded_span_end - (r.chunk_char_start or 0)
+            quoted = r.chunk_text[local_start:local_end]
+            if quoted:
+                nq = normalize(quoted)
+                nc = normalize(r.chunk_text)
+                if nq and nq in nc:
+                    hits += 1
+    precision = (hits / grounded) if grounded else 0.0
+    grounding_rate = (grounded / total) if total else 0.0
+    return ScorecardResponse(
+        citation_precision=precision,
+        grounding_rate=grounding_rate,
+        total_claims=total,
+        grounded_claims=grounded,
     )
 
 

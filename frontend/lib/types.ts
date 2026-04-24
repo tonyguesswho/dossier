@@ -56,6 +56,13 @@ export interface SourceListItem {
   source_kind: "web" | "github" | "crawl" | "news" | "deck_page" | "crunchbase";
 }
 
+export interface Scorecard {
+  citation_precision: number;
+  grounding_rate: number;
+  total_claims: number;
+  grounded_claims: number;
+}
+
 export interface BriefResponse {
   id: string;
   display_name: string;
@@ -64,6 +71,7 @@ export interface BriefResponse {
   sources: SourceListItem[];
   started_at: string;
   completed_at: string | null;
+  scorecard: Scorecard | null;
 }
 
 // Phase 6-lite chat (Plan 03-14).

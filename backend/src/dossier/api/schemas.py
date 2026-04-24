@@ -152,6 +152,23 @@ class InvestigationListResponse(BaseModel):
     items: list[InvestigationListItem]
 
 
+class ScorecardResponse(BaseModel):
+    """Eval scorecard surfaced on the brief — citation discipline made visible.
+
+    - `citation_precision`: share of grounded claims whose quoted_span is
+      verbatim substring of the cited chunk (normalized). 1.0 means every
+      citation verifies by ctrl-F.
+    - `grounding_rate`: share of synthesizer claims that the grounder
+      accepted. Low rate means many claims dropped rather than fabricate.
+    - `total_claims` / `grounded_claims`: the raw counts the ratios came from.
+    """
+    model_config = ConfigDict(from_attributes=True)
+    citation_precision: float
+    grounding_rate: float
+    total_claims: int
+    grounded_claims: int
+
+
 class InvestigationBriefResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
@@ -161,6 +178,7 @@ class InvestigationBriefResponse(BaseModel):
     sources: list[SourceListItem]
     started_at: datetime
     completed_at: Optional[datetime] = None
+    scorecard: Optional[ScorecardResponse] = None
 
 
 # ---------------------------------------------------------------------------

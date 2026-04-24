@@ -27,6 +27,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { BriefActions } from "@/components/BriefActions";
+import { Scorecard } from "@/components/Scorecard";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { Button } from "@/components/ui/button";
 import type { BriefResponse } from "@/lib/types";
@@ -68,6 +69,7 @@ export function BriefViewer({ brief }: { brief: BriefResponse }) {
               One-page brief ·{" "}
               {brief.completed_at ? relativeTime(brief.completed_at) : "just now"}
             </p>
+            {brief.scorecard && <Scorecard data={brief.scorecard} />}
           </div>
         </div>
       </section>
