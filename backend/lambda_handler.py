@@ -26,6 +26,7 @@ Why lifespan="off":
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -35,6 +36,19 @@ from dossier.api.main import app
 from dossier.investigate.graph import runner
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_event_loop() -> None:
+    """Mangum 0.19 calls asyncio.get_event_loop(); Python 3.12 changed this
+    to raise RuntimeError when no loop is set on the main thread (instead of
+    auto-creating one as <=3.10 did). Lambda's runtime never primes a loop,
+    so every Mangum request crashes here with `RuntimeError: There is no
+    current event loop in thread 'MainThread'`. Pre-create one if missing.
+    """
+    try:
+        asyncio.get_event_loop()
+    except RuntimeError:
+        asyncio.set_event_loop(asyncio.new_event_loop())
 
 # Mangum wraps the FastAPI ASGI app so Lambda HTTP events become ASGI calls.
 # Constructed at module import time -> shared across warm invocations.
@@ -70,6 +84,7 @@ def handler(event: dict, context: Any) -> Any:
         request_ctx["http"] = http_ctx
         event["requestContext"] = request_ctx
 
+    _ensure_event_loop()
     logger.info("lambda_handler: dispatching to Mangum/FastAPI")
     return _mangum(event, context)
 
