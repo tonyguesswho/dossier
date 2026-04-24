@@ -327,10 +327,23 @@ graph's `finalize` node didn't persist `brief_markdown` because that was
 pipeline-only behavior, not documented on the graph side. Cost: one
 hotfix commit on deploy day.
 
-**Where to push back:** This is flagged as post-capstone tech debt in
-`README.md`'s Known Limitations section. The defensible counter: a
-reviewer might argue the cleanup should have happened during Phase 3
-itself, not deferred. Fair critique.
+**Current state (post-capstone day 14 cleanup):** text + URL investigations
+now route through the graph in BOTH local dev and AWS — `_dispatch_local`
+wraps `run_graph` in a sync adapter and hands it to FastAPI's
+BackgroundTasks. Deck (PDF upload) investigations remain on `pipeline.py`
+because the graph's `gather_fanout` doesn't yet know to skip when the
+corpus is pre-populated by the upload handler. Deleting `pipeline.py`
+entirely is a few hours of work to teach `gather_fanout` that input_type
+= 'deck' means 'skip'. Deferred, but `pipeline.py` is now a deck-only
+dispatcher rather than a parallel implementation.
+
+**Where to push back:** The intermediate state ("graph for text/URL,
+pipeline for decks") is still two-pipeline territory, just with a
+smaller surface. A reviewer could legitimately argue the deck path
+should have been rewired in the same commit. Fair critique; the counter
+is deploy-day risk: the deck path is newer (Phase 5-lite) and rewiring
+it for the graph while also confirming AWS stability isn't a 3-hour
+job.
 
 ---
 

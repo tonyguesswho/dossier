@@ -122,13 +122,26 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
     return row
 
 
-def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    """Phase 2 inline dispatch — FastAPI BackgroundTasks runs the linear pipeline.
-
-    Used when DOSSIER_DISPATCH_MODE is unset or =local. Keeps `uv run uvicorn`
-    local-dev workflow working without AWS credentials or a deployed Lambda.
+def _run_graph_sync(investigation_id: UUID) -> None:
+    """Sync wrapper that asyncio.runs the graph. BackgroundTasks takes sync
+    callables only; runner.run_graph is async. This is the local-dev-mode
+    adapter — exercises the same graph path as AWS so local behavior matches
+    production (no more 'works in pipeline.py but not graph' contract drift).
     """
-    background_tasks.add_task(run_investigation, investigation_id)
+    import asyncio  # noqa: PLC0415 — keep import local to dispatch path
+    from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
+    asyncio.run(run_graph(str(investigation_id)))
+
+
+def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
+    """Local-dev dispatch — FastAPI BackgroundTasks runs the graph in-process.
+
+    Unified on the graph in the post-demo cleanup (previously ran the
+    linear pipeline.run_investigation). Keeps `uv run uvicorn` local-dev
+    workflow working without AWS, while exercising the same code path
+    production uses. See DECISIONS.md #12.
+    """
+    background_tasks.add_task(_run_graph_sync, investigation_id)
 
 
 def _dispatch_lambda(investigation_id: UUID) -> None:
