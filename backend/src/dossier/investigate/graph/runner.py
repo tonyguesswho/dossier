@@ -124,11 +124,15 @@ async def run_graph(investigation_id: str) -> None:
     # strict=False: missing Langfuse creds degrade to no-op, do not crash the run.
     langfuse_client = get_langfuse_client(strict=False)
 
-    # Read investigation row: company, context_hint, input_type, input_ref, langfuse_trace_id
+    # Read investigation row. The investigations table has no `company_name`
+    # or `context_hint` columns — those are encoded inside `input_ref` via
+    # HINT_SEPARATOR (Phase 2 convention from pipeline.py / Plan 02-09).
+    # We parse them out here using the same separator.
+    from dossier.investigate.pipeline import HINT_SEPARATOR  # noqa: PLC0415
     async with get_async_session() as session:
         result = await session.execute(
             text(
-                "SELECT company_name, context_hint, input_type, input_ref, langfuse_trace_id "
+                "SELECT input_type, input_ref, langfuse_trace_id "
                 "FROM investigations WHERE id = :id"
             ),
             {"id": investigation_id},
@@ -141,8 +145,11 @@ async def run_graph(investigation_id: str) -> None:
             flush_and_shutdown(langfuse_client, lambda_sleep=True)
         return
 
-    company_name, context_hint, input_type, input_ref, langfuse_trace_id = row
-    input_url = input_ref if input_type == "url" else None
+    input_type, input_ref, langfuse_trace_id = row
+    value, _, hint = (input_ref or "").partition(HINT_SEPARATOR)
+    company_name = value.strip() or "unknown"
+    context_hint = hint.strip() if hint else None
+    input_url = value.strip() if input_type == "url" else None
 
     checkpointer = await _get_checkpointer()
     graph = build_graph(checkpointer=checkpointer)

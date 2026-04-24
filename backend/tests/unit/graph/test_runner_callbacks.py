@@ -158,10 +158,8 @@ def test_callbacks_populated_when_handler_returned(patched_runner):
     """Happy path: handler returned → config['callbacks'] == [handler]."""
     fake_handler = object()
     patched_runner["row"] = (
-        "Stripe",                         # company_name
-        "payments infra",                 # context_hint
-        "company_name",                   # input_type
-        "Stripe",                         # input_ref
+        "name",                           # input_type
+        "Stripe",                         # input_ref (would carry HINT_SEPARATOR + hint in real rows)
         "lf-trace-abc-123",               # langfuse_trace_id
     )
     patched_runner["handler"] = fake_handler
@@ -177,9 +175,7 @@ def test_callbacks_populated_when_handler_returned(patched_runner):
 
 def test_callbacks_empty_list_when_handler_none(patched_runner):
     """Langfuse outage: factory → None → callbacks is [], not [None], not missing."""
-    patched_runner["row"] = (
-        "Linear", None, "company_name", "Linear", "lf-trace-no-handler"
-    )
+    patched_runner["row"] = ("name", "Linear", "lf-trace-no-handler")
     patched_runner["handler"] = None  # simulate creds absent / outage
     patched_runner["install"]()
 
@@ -194,9 +190,7 @@ def test_callbacks_empty_list_when_handler_none(patched_runner):
 
 def test_handler_factory_called_with_row_trace_id(patched_runner):
     """Factory receives trace_id from the investigations row (D-03)."""
-    patched_runner["row"] = (
-        "Anthropic", None, "company_name", "Anthropic", "lf-trace-xyz-777"
-    )
+    patched_runner["row"] = ("name", "Anthropic", "lf-trace-xyz-777")
     patched_runner["handler"] = object()
     patched_runner["install"]()
 
@@ -210,9 +204,7 @@ def test_handler_factory_called_with_row_trace_id(patched_runner):
 
 def test_config_carries_session_id_metadata(patched_runner):
     """4.x session plumbing: config['metadata']['langfuse_session_id'] is set."""
-    patched_runner["row"] = (
-        "OpenAI", None, "company_name", "OpenAI", "lf-trace-meta-001"
-    )
+    patched_runner["row"] = ("name", "OpenAI", "lf-trace-meta-001")
     patched_runner["handler"] = object()
     patched_runner["install"]()
 
@@ -224,9 +216,7 @@ def test_config_carries_session_id_metadata(patched_runner):
 
 def test_thread_id_preserved_in_configurable(patched_runner):
     """Adding callbacks/metadata must not disturb configurable.thread_id (resume)."""
-    patched_runner["row"] = (
-        "Mistral", None, "company_name", "Mistral", "lf-trace-thread"
-    )
+    patched_runner["row"] = ("name", "Mistral", "lf-trace-thread")
     patched_runner["handler"] = None
     patched_runner["install"]()
 
