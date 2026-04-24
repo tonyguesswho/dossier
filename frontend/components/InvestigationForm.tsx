@@ -279,15 +279,26 @@ export function InvestigationForm() {
           <label htmlFor="deck" className="text-[15px] font-semibold">
             Pitch deck (PDF)
           </label>
-          <Input
+          {/*
+            Native <input type="file"> (not shadcn's <Input>) — the shadcn wrapper
+            mangled the native "Choose File" button height so it wasn't clickable.
+            Native rendering differs per OS/browser but always produces a working
+            file chooser.
+          */}
+          <input
             key="input-file"
             id="deck"
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,.pdf"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             aria-describedby={error ? "form-error" : "deck-help"}
-            className="cursor-pointer file:mr-3 file:rounded file:border-0 file:bg-muted file:px-3 file:py-1 file:text-[13px] file:font-medium"
+            className="block w-full cursor-pointer rounded-md border border-input bg-transparent text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-3 file:py-2 file:text-[13px] file:font-medium file:text-foreground hover:file:bg-muted/80"
           />
+          {file && (
+            <p className="text-[13px] text-muted-foreground mt-1">
+              Selected: <span className="font-medium text-foreground">{file.name}</span> ({Math.round(file.size / 1024)} KB)
+            </p>
+          )}
           <p id="deck-help" className="text-[13px] text-muted-foreground mt-1">
             PDF, under 10 MB. Text is extracted via MarkItDown — image-only scans
             aren&apos;t supported yet.
