@@ -104,7 +104,35 @@ async def run(state: DossierState) -> dict:
         ground_claims, investigation_uuid, brief, retrieved
     )
 
-    # ---- Mark complete + read back grounded claims -------------------------
+    # ---- Render brief_markdown (same shape as Phase 2 linear pipeline) -----
+    # The graph path previously shipped status=complete but never persisted
+    # brief_markdown, so the Vercel UI rendered an empty brief even though
+    # claims + chunks existed. Build the url-by-chunk map from the whole
+    # investigation corpus (matches pipeline._brief_to_markdown contract).
+    # Fail-open on the url lookup: if the SELECT is unavailable (stubbed-out
+    # mocks in unit tests, transient DB blip), render with an empty map so
+    # claims still get section headers and `(source)` fallback markers rather
+    # than failing the whole pipeline at the very last step.
+    from dossier.investigate.pipeline import _brief_to_markdown  # noqa: PLC0415
+    url_by_chunk: dict[str, str] = {}
+    try:
+        async with get_async_session() as session:
+            url_rows_result = await session.execute(
+                text(
+                    "SELECT sc.id::text AS chunk_id, s.url AS url "
+                    "FROM source_chunks sc "
+                    "JOIN sources s ON sc.source_id = s.id "
+                    "WHERE s.investigation_id = CAST(:iid AS UUID)"
+                ),
+                {"iid": investigation_id_str},
+            )
+            if url_rows_result is not None:
+                url_by_chunk = {r.chunk_id: r.url for r in url_rows_result}
+    except Exception:  # noqa: BLE001 — last-mile render must never poison status
+        logger.exception("finalize: url_by_chunk lookup failed; rendering without links")
+    brief_md = _brief_to_markdown(brief, url_by_chunk)
+
+    # ---- Mark complete + persist brief_markdown + read back grounded claims
     # One session.begin() so the UPDATE status and the SELECT grounded rows
     # observe a consistent snapshot. WARNING-3: populate grounded_claims in
     # state by querying rows with non-null grounded_source_chunk_id.
@@ -116,11 +144,12 @@ async def run(state: DossierState) -> dict:
                     """
                     UPDATE investigations
                     SET status = CAST(:s AS investigation_status),
-                        completed_at = now()
+                        completed_at = now(),
+                        brief_markdown = :md
                     WHERE id = CAST(:id AS UUID)
                     """
                 ),
-                {"s": "complete", "id": investigation_id_str},
+                {"s": "complete", "md": brief_md, "id": investigation_id_str},
             )
 
             result = await session.execute(
