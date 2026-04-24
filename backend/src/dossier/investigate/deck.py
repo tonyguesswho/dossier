@@ -36,7 +36,10 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from pydantic import BaseModel, ConfigDict
+
 from dossier.core.db import get_engine
+from dossier.core.llm import CHEAP_MODEL_ID, strong_model
 from dossier.investigate.ingest import ingest_tool_results
 from dossier.investigate.tools.types import ToolResult
 
@@ -56,6 +59,68 @@ def pdf_to_markdown(pdf_bytes: bytes, filename: str) -> str:
     stream = io.BytesIO(pdf_bytes)
     result = md.convert_stream(stream, file_extension=".pdf")
     return result.text_content or ""
+
+
+class _ExtractedCompany(BaseModel):
+    """Structured output for deck → company-name extraction."""
+    model_config = ConfigDict(extra="forbid")
+    company_name: str
+    confidence: float  # 0.0–1.0; below ~0.5 means "not confident"
+
+
+_COMPANY_EXTRACT_SYSTEM = """You identify the subject company of a pitch deck.
+
+Given the first pages of a pitch deck's extracted text, return the company
+name that owns the deck. This is almost always on the cover slide or in
+the first heading.
+
+Rules:
+- Return the SHORT brand name (e.g. "Uber", "Airbnb", "Stripe"), not a long
+  tagline or product descriptor.
+- If the deck is clearly about multiple companies (a market-research deck, a
+  portfolio review), pick the single most prominent subject.
+- If you can't confidently identify a subject, set confidence below 0.5 and
+  put your best guess (or "unknown") in company_name.
+"""
+
+
+def extract_company_from_markdown(markdown: str, *, client=None) -> str | None:
+    """Return the subject company name, or None if extraction fails / is unsure.
+
+    Uses Haiku for cost (cheap_model_id) via OpenRouter + structured output.
+    Truncates to the first 3000 chars — the cover and executive-summary slides
+    are where the brand name lives; beyond that it's mostly body content that
+    just adds cost without signal.
+
+    Fail-open: any LLM error (network, parse, empty) returns None so the
+    caller falls back to filename-derived display name. Deck upload path is
+    already wrapped in a broad try/except; this function must not raise.
+    """
+    if not markdown or not markdown.strip():
+        return None
+
+    sample = markdown[:3000]
+    active_client = client if client is not None else strong_model()
+    try:
+        completion = active_client.beta.chat.completions.parse(
+            model=CHEAP_MODEL_ID,
+            messages=[
+                {"role": "system", "content": _COMPANY_EXTRACT_SYSTEM},
+                {"role": "user", "content": sample},
+            ],
+            response_format=_ExtractedCompany,
+        )
+        parsed = completion.choices[0].message.parsed
+    except Exception:
+        logger.warning("deck: company-name extraction failed", exc_info=True)
+        return None
+
+    if parsed is None or parsed.confidence < 0.5 or not parsed.company_name.strip():
+        return None
+    name = parsed.company_name.strip()
+    if name.lower() in {"unknown", "n/a", "none"}:
+        return None
+    return name
 
 
 def run_deck_investigation(

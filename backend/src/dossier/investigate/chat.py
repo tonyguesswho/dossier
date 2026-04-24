@@ -203,10 +203,16 @@ WEAK_RETRIEVAL_DISTANCE = 0.4
 
 def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
     """Return a best-effort human subject for the investigation: the input_ref
-    with any `[hint: ...]` suffix stripped. Used to scope widen-search queries
-    so a chat turn like 'where is the headquarters' doesn't pull in unrelated
-    companies' pages. Returns None if the row is missing.
+    with the HINT_SEPARATOR suffix stripped. Used to scope widen-search
+    queries so a chat turn like 'where is the headquarters' doesn't pull in
+    unrelated companies' pages. Returns None if the row is missing.
+
+    HINT_SEPARATOR is `\\n---HINT---\\n` (pipeline.py). Previously this code
+    looked for `[hint:` which was the wrong separator — every subject came
+    through with the hint tail still attached. Fixed by using the real
+    constant via a deferred import.
     """
+    from dossier.investigate.pipeline import HINT_SEPARATOR  # noqa: PLC0415
     with eng.connect() as conn:
         row = conn.execute(
             text("SELECT input_ref FROM investigations WHERE id = :id"),
@@ -214,9 +220,7 @@ def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
         ).fetchone()
     if row is None or not row[0]:
         return None
-    subject = row[0]
-    if " [hint:" in subject:
-        subject = subject.split(" [hint:", 1)[0].strip()
+    subject = row[0].split(HINT_SEPARATOR, 1)[0].strip()
     return subject or None
 
 

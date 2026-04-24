@@ -284,7 +284,11 @@ def upload_deck_investigation(
     """Accept a pitch-deck PDF, convert via MarkItDown, dispatch pipeline."""
     # Deferred import — keeps the API module cheap to load; MarkItDown pulls in
     # pdfminer + lxml on first use.
-    from dossier.investigate.deck import pdf_to_markdown, run_deck_investigation  # noqa: PLC0415
+    from dossier.investigate.deck import (  # noqa: PLC0415
+        extract_company_from_markdown,
+        pdf_to_markdown,
+        run_deck_investigation,
+    )
 
     eng = _engine()
 
@@ -315,10 +319,31 @@ def upload_deck_investigation(
     _ensure_user_exists(eng, clerk_user_id)
 
     investigation_id = uuid4()
-    # input_ref encodes the filename (display value) plus optional hint.
-    # The existing _strip_hint / HINT_SEPARATOR convention keeps the LIB-01 list
-    # card showing just "deck.pdf" without the hint tail bleeding in.
-    input_ref = _build_input_ref(filename, context_hint)
+    # Extract subject company from the deck's cover slide via Haiku so chat
+    # widen-search has a real name to scope to (filename-as-subject pulled
+    # unrelated companies — see 'Iyinoluwa Aboyeji' → Flutterwave contamination).
+    # Fail-open: if extraction returns None, fall back to the filename.
+    extracted_company: str | None = None
+    try:
+        extracted_company = extract_company_from_markdown(markdown)
+    except Exception:  # noqa: BLE001
+        logger.exception("deck: company-name extraction threw; falling back to filename")
+    display_value = extracted_company or filename
+    logger.info(
+        "deck upload: investigation_id=%s filename=%r extracted_company=%r using=%r",
+        investigation_id, filename, extracted_company, display_value,
+    )
+    # input_ref is used as the investigation subject by chat widen-search and
+    # the LIB-01 list card heading; also referenced by `_resolve_inputs` on the
+    # deck branch. We PREFER the extracted company name but keep a filename
+    # reference in the hint suffix so the library card and debug logs can
+    # always link back to the upload.
+    hint_parts: list[str] = []
+    if extracted_company:
+        hint_parts.append(f"deck: {filename}")
+    if context_hint:
+        hint_parts.append(context_hint)
+    input_ref = _build_input_ref(display_value, " | ".join(hint_parts) or None)
 
     with eng.begin() as conn:
         conn.execute(
