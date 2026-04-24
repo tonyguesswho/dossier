@@ -35,3 +35,8 @@ backend/alembic/versions/__pycache__/
 
 # Docker volume mount
 .docker-data/
+
+# Demo/presentation artifacts + random background-task output
+dossier_presentation.html
+nohup.out
+*.nohup
