@@ -159,6 +159,51 @@ def _load_url_by_chunk(conn, investigation_id: UUID) -> dict[str, str]:
     return {r.chunk_id: r.url for r in url_rows}
 
 
+# ---------------------------------------------------------------------------
+# Widen-search: fire a fresh Exa query when the initial retrieval is weak.
+# ---------------------------------------------------------------------------
+# Cosine distance threshold. Below = good match; above = weak. Tuned for
+# text-embedding-3-small: in-corpus matches usually land at 0.15–0.35; 0.4+
+# typically means the question is asking about something we don't have.
+WEAK_RETRIEVAL_DISTANCE = 0.4
+
+
+def _widen_search(
+    investigation_id: UUID,
+    question: str,
+    eng: Engine,
+) -> int:
+    """Fresh Exa search for the question; ingest results; return count ingested.
+
+    Returns 0 and logs if Exa is unavailable / returns nothing / ingest errors.
+    Never raises — chat turn must still complete with whatever the original
+    retrieval produced.
+    """
+    try:
+        from dossier.investigate.tools import exa as exa_tool
+        from dossier.investigate.ingest import ingest_tool_results
+    except Exception:
+        logger.exception("chat: widen-search imports failed")
+        return 0
+
+    try:
+        new_results = exa_tool.search(question, num_results=3)
+    except Exception:
+        logger.warning("chat: widen Exa call failed; continuing with existing corpus", exc_info=True)
+        return 0
+
+    if not new_results:
+        return 0
+
+    try:
+        ingest_tool_results(investigation_id, new_results, engine=eng)
+    except Exception:
+        logger.exception("chat: widen-ingest failed; continuing with existing corpus")
+        return 0
+
+    return len(new_results)
+
+
 def run_chat_turn(
     investigation_id: UUID,
     question: str,
@@ -166,9 +211,15 @@ def run_chat_turn(
     engine: Engine | None = None,
     client: Any = None,
 ) -> tuple[str, list[str]]:
-    """End-to-end: retrieve → synthesize → resolve citations → persist.
+    """End-to-end: retrieve → (widen if weak) → synthesize → resolve → persist.
 
     Returns (assistant_content_with_resolved_citations, cited_chunk_ids).
+
+    Widen-search: when the top-1 retrieved chunk has cosine distance above
+    WEAK_RETRIEVAL_DISTANCE (or retrieval is empty), we fire a fresh Exa
+    search scoped to the question itself, ingest the new chunks into this
+    investigation, and retrieve again. Fail-open: if Exa errors or returns
+    nothing, we answer from the original corpus (possibly with "I don't know").
 
     Persistence note: the user turn and the assistant turn land in one
     transaction so a mid-write crash can't leave an orphan user turn in the
@@ -177,10 +228,22 @@ def run_chat_turn(
     eng = engine if engine is not None else get_engine()
 
     retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
+    top_distance = retrieved[0].distance if retrieved else None
+    is_weak = (not retrieved) or (top_distance is not None and top_distance > WEAK_RETRIEVAL_DISTANCE)
+
+    widened_count = 0
+    if is_weak:
+        logger.info(
+            "chat: weak retrieval (top_distance=%s); firing widen-search for question=%r",
+            top_distance, question[:80],
+        )
+        widened_count = _widen_search(investigation_id, question, eng)
+        if widened_count > 0:
+            # Re-retrieve now that fresh chunks are in the corpus.
+            retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
+
     if not retrieved:
-        # Still persist the user turn + a system-ish assistant response so the
-        # history reflects the attempted conversation. Without this the user
-        # would see their question disappear on a no-sources investigation.
+        # Even after widen we have nothing — honest reply + persist so history reflects.
         empty_reply = "I don't have any source material for this investigation yet."
         _persist_turn_pair(eng, investigation_id, question, empty_reply, [])
         return empty_reply, []
