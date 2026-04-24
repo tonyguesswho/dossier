@@ -84,7 +84,10 @@ async def _get_checkpointer() -> Any:
         database_url = os.environ["DATABASE_URL"]
         _pool = AsyncConnectionPool(
             conninfo=database_url,
+            min_size=0,  # open connections lazily — Lambda warms up fast, not worth pre-opening
             max_size=2,  # single-invocation Lambda; 2 connections is enough
+            # psycopg_pool >=3.2 default min_size is 4; must explicitly pin ≤ max_size
+            # or the pool raises "max_size must be greater or equal than min_size" on init.
             kwargs={
                 "autocommit": True,       # required by AsyncPostgresSaver.setup()
                 "prepare_threshold": 0,   # CRITICAL: prevents RDS Proxy pinning (Pitfall 7.4)
