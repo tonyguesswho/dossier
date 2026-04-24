@@ -17,7 +17,7 @@ resource "aws_db_subnet_group" "main" {
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds"
-  description = "Allow Postgres 5432 from anywhere (DEMO ONLY — tighten post-panel)"
+  description = "Allow Postgres 5432 from anywhere (DEMO ONLY - tighten post-panel)"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {

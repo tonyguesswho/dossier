@@ -57,6 +57,19 @@ def handler(event: dict, context: Any) -> Any:
     if "investigation_id" in event:
         logger.info("lambda_handler: dispatching to runner.handler")
         return runner.handler(event, context)
+
+    # Mangum's API Gateway v2 handler hard-requires `requestContext.http.sourceIp`
+    # but Lambda Function URL events sometimes omit it (depends on runtime
+    # version + IP-attribution config). Inject a sentinel so Mangum can unpack
+    # the scope; the value is only used for ASGI scope.client[0] which our
+    # FastAPI app doesn't read for routing.
+    request_ctx = event.get("requestContext", {})
+    http_ctx = request_ctx.get("http", {}) if isinstance(request_ctx, dict) else {}
+    if isinstance(http_ctx, dict) and "sourceIp" not in http_ctx:
+        http_ctx["sourceIp"] = "0.0.0.0"
+        request_ctx["http"] = http_ctx
+        event["requestContext"] = request_ctx
+
     logger.info("lambda_handler: dispatching to Mangum/FastAPI")
     return _mangum(event, context)
 
