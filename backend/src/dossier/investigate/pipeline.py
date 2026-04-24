@@ -41,6 +41,7 @@ Phase coverage:
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 from typing import Optional
 from uuid import UUID
@@ -163,9 +164,17 @@ def _resolve_inputs(
         url = value.strip()
         return url, url, hint_clean
     if input_type == "deck":
-        raise PipelineError(
-            "input_type='deck' is Phase 5 scope; not supported in Phase 2"
-        )
+        # Phase 5-lite (Plan 03-13): the deck's text is pre-ingested into
+        # source_chunks BEFORE run_investigation is called, so _gather will
+        # skip tool calls and the pipeline proceeds straight to retrieve+synth.
+        # Use the filename (stem, dashes → spaces) as the "company" display
+        # name — good enough for the synthesizer's system prompt and the
+        # brief header.
+        filename = value.strip() or "pitch deck"
+        stem = filename.rsplit(".", 1)[0]
+        # Strip timestamp-ish noise like -170823132244 and re-space
+        display = re.sub(r"[-_]\d{6,}.*$", "", stem).replace("-", " ").replace("_", " ").strip()
+        return display or stem or filename, None, hint_clean
     raise PipelineError(f"Unknown input_type: {input_type!r}")
 
 
@@ -372,15 +381,25 @@ def run_investigation(
                     with lf_client.start_as_current_observation(
                         as_type="span", name="gather"
                     ):
-                        tool_results = _gather(company, seed_url, investigation_id)
+                        # Deck path (Plan 03-13): run_deck_investigation has
+                        # already pre-ingested the extracted markdown as the
+                        # sole ToolResult. Skip web gather + re-ingest.
+                        if input_type == "deck":
+                            logger.info(
+                                "pipeline: skipping gather+ingest (deck path, chunks pre-ingested)"
+                            )
+                            tool_results: list[ToolResult] = []
+                        else:
+                            tool_results = _gather(company, seed_url, investigation_id)
 
                     # Stage 2 — ingest (still under 'gathering'; ingest is cheap)
                     with lf_client.start_as_current_observation(
                         as_type="span", name="ingest"
                     ):
-                        ingest_tool_results(
-                            investigation_id, tool_results, engine=eng
-                        )
+                        if tool_results:
+                            ingest_tool_results(
+                                investigation_id, tool_results, engine=eng
+                            )
 
                     # Stage 3 — retrieve + Stage 4 — synthesize, both under 'synthesizing'
                     _update_status(eng, investigation_id, "synthesizing")

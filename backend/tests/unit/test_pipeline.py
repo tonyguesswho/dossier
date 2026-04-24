@@ -184,9 +184,13 @@ def test_resolve_inputs_url_with_hint() -> None:
     assert hint == "AI infra, Series A"
 
 
-def test_resolve_inputs_deck_rejected() -> None:
-    with pytest.raises(PipelineError, match="Phase 5"):
-        _resolve_inputs("deck", "any")
+def test_resolve_inputs_deck_returns_display_name() -> None:
+    # Plan 03-13 (Phase 5-lite): deck input_type is now supported — returns
+    # a best-effort display name derived from the filename.
+    company, seed_url, hint = _resolve_inputs("deck", "uberpitchdeck-170823132244.pdf")
+    assert "uber" in company.lower()
+    assert seed_url is None
+    assert hint is None
 
 
 def test_resolve_inputs_unknown_type_rejected() -> None:
@@ -364,16 +368,18 @@ def test_missing_investigation_row_fails_without_raising(patched_pipeline) -> No
     assert any("not found" in (u.get("err") or "") for u in engine.conn.updates)
 
 
-def test_deck_input_type_fails_fast(patched_pipeline) -> None:
-    """Phase 2 rejects 'deck' — it's Phase 5 scope."""
+def test_deck_input_type_skips_gather(patched_pipeline) -> None:
+    """Plan 03-13 (Phase 5-lite): deck input_type now proceeds through the
+    pipeline with gather+ingest skipped (the deck markdown is pre-ingested
+    by run_deck_investigation into source_chunks before this runs)."""
     inv_id = uuid4()
-    engine = _FakeEngine(SimpleNamespace(input_type="deck", input_ref="something"))
+    engine = _FakeEngine(SimpleNamespace(input_type="deck", input_ref="deck.pdf"))
 
     run_investigation(inv_id, engine=engine)
 
+    # Should NOT be marked failed with Phase-5 error anymore.
     last = engine.conn.updates[-1]
-    assert last["s"] == "failed"
-    assert "Phase 5" in (last["err"] or "")
+    assert "Phase 5" not in (last.get("err") or "")
 
 
 # ---------------------------------------------------------------------------
