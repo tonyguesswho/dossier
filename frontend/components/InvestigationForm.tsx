@@ -259,11 +259,12 @@ export function InvestigationForm() {
       </div>
 
       {mode === "text" ? (
-        <div className="flex flex-col gap-1">
+        <div key="text-input" className="flex flex-col gap-1">
           <label htmlFor="value" className="text-[15px] font-semibold">
             Company name or URL
           </label>
           <Input
+            key="input-text"
             id="value"
             value={value}
             onChange={(e) => setValue(e.target.value)}
@@ -274,11 +275,12 @@ export function InvestigationForm() {
           />
         </div>
       ) : (
-        <div className="flex flex-col gap-1">
+        <div key="deck-input" className="flex flex-col gap-1">
           <label htmlFor="deck" className="text-[15px] font-semibold">
             Pitch deck (PDF)
           </label>
           <Input
+            key="input-file"
             id="deck"
             type="file"
             accept="application/pdf"
