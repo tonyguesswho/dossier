@@ -32,6 +32,12 @@ resource "aws_amplify_app" "frontend" {
   repository  = var.github_repo_url
   oauth_token = var.github_oauth_token
 
+  # WEB_COMPUTE = SSR. Amplify provisions an internal Lambda + CloudFront for
+  # the Next.js server-rendered routes. The default 'WEB' platform serves
+  # build artifacts as static S3 — which 404s on every Next.js App Router
+  # path because the .next/ output isn't a static export.
+  platform = "WEB_COMPUTE"
+
   iam_service_role_arn = aws_iam_role.amplify[0].arn
 
   # Amplify's per-app YAML. Roots the build at frontend/ (monorepo: backend/
