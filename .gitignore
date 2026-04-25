@@ -40,3 +40,6 @@ backend/alembic/versions/__pycache__/
 dossier_presentation.html
 nohup.out
 *.nohup
+
+# Claude Code local config
+.claude/
