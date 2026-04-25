@@ -37,6 +37,10 @@ resource "aws_amplify_app" "frontend" {
   # Amplify's per-app YAML. Roots the build at frontend/ (monorepo: backend/
   # is also in this repo and Amplify must skip it). pnpm install + pnpm build
   # are the only commands needed; Amplify auto-detects Next.js SSR.
+  # pnpm version pinned to 8.6.7 — matches the lockfileVersion 6.0 written
+  # by local dev. `corepack prepare pnpm@latest` would install pnpm 10+
+  # which rejects v6 lockfiles ("ERR_PNPM_LOCKFILE_BREAKING_CHANGE"). Bump
+  # both sides together when you upgrade pnpm.
   build_spec = <<-EOT
     version: 1
     applications:
@@ -46,7 +50,7 @@ resource "aws_amplify_app" "frontend" {
             preBuild:
               commands:
                 - corepack enable
-                - corepack prepare pnpm@latest --activate
+                - corepack prepare pnpm@8.6.7 --activate
                 - pnpm install --frozen-lockfile
             build:
               commands:
@@ -109,7 +113,7 @@ resource "aws_iam_role_policy_attachment" "amplify_admin" {
   role  = aws_iam_role.amplify[0].name
   # AWS-managed policy that grants Amplify the cross-service permissions it
   # needs to provision its own SSR Lambda + S3 + CloudFront under the hood.
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AdministratorAccess-Amplify"
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess-Amplify"
 }
 
 output "amplify_app_id" {
