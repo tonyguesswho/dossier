@@ -46,6 +46,7 @@ dependencies = [
     "boto3>=1.40.0",
     "markitdown[pdf]>=0.1.5",
     "langchain>=1.2.15",
+    "pydantic-settings>=2.14.0",
 ]
 
 [dependency-groups]
