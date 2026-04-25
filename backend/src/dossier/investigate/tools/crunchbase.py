@@ -27,10 +27,10 @@ to whatever partial data was collected.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Any
 
+from dossier.core.settings import get_settings
 from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ async def search(company: str) -> list[ToolResult]:
     or [] on any failure. Fail-open is mandatory here: Crunchbase is optional
     enrichment (T-03-04-04), not a required source.
     """
-    api_key = os.environ.get(_CB_USER_KEY_ENV)
+    api_key = get_settings().crunchbase_api_key or None
 
     try:
         org_data = await _fetch_org_summary(company, api_key)

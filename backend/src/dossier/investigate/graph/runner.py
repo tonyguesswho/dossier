@@ -55,10 +55,9 @@ def _check_security_invariants() -> None:
     invocation fail loudly, guaranteeing the misconfiguration is caught
     on first call rather than silently bypassing auth.
     """
-    if (
-        os.environ.get("DOSSIER_AUTH_DEV_BYPASS")
-        and os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
-    ):
+    from dossier.core.settings import get_settings  # noqa: PLC0415 — defer
+    s = get_settings()
+    if s.dossier_auth_dev_bypass and s.is_lambda_runtime:
         raise RuntimeError(
             "SECURITY: DOSSIER_AUTH_DEV_BYPASS must not be set when running as a "
             "deployed Lambda (AWS_LAMBDA_FUNCTION_NAME is present). "
@@ -81,15 +80,11 @@ async def _get_checkpointer() -> Any:
     from psycopg_pool import AsyncConnectionPool
 
     if _pool is None:
-        database_url = os.environ["DATABASE_URL"]
-        # DATABASE_URL is written in SQLAlchemy driver-tagged form
-        # (postgresql+psycopg://...) because the sync code paths use SQLAlchemy.
-        # psycopg_pool wants a plain libpq DSN; strip the driver suffix or it
-        # treats the whole URL as a single malformed option.
-        if database_url.startswith("postgresql+psycopg://"):
-            database_url = "postgresql://" + database_url[len("postgresql+psycopg://"):]
+        from dossier.core.settings import get_settings  # noqa: PLC0415 — defer
+        # database_url_libpq is the SQLAlchemy URL with the +psycopg driver
+        # suffix stripped — psycopg_pool refuses the SQLAlchemy form.
         _pool = AsyncConnectionPool(
-            conninfo=database_url,
+            conninfo=get_settings().database_url_libpq,
             min_size=0,  # open connections lazily — Lambda warms up fast, not worth pre-opening
             max_size=2,  # single-invocation Lambda; 2 connections is enough
             # psycopg_pool >=3.2 default min_size is 4; must explicitly pin ≤ max_size

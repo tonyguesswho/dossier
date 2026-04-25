@@ -43,20 +43,19 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 _engine: Engine | None = None
 
 
 def read_database_url() -> str:
-    """Return DATABASE_URL; raise RuntimeError on missing (same message as alembic/env.py)."""
-    load_env()
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        raise RuntimeError(
-            "DATABASE_URL not set. Copy .env.example to .env and fill in local Postgres creds."
-        )
-    return url
+    """Return DATABASE_URL; thin pass-through to Settings.
+
+    Kept as a function (rather than callers reading Settings directly) so the
+    dependency injection seam stays at one place — `_reset_engine_for_tests()`
+    + monkeypatching `os.environ["DATABASE_URL"]` continues to work.
+    """
+    return get_settings().database_url
 
 
 def get_engine() -> Engine:

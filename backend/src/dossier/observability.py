@@ -36,7 +36,6 @@ References:
 from __future__ import annotations
 
 import logging
-import os
 import pathlib
 import re
 from typing import Any
@@ -54,14 +53,16 @@ _EnvTriple = tuple[str, str, str]  # (public_key, secret_key, host)
 
 
 def load_env(env_path: pathlib.Path | None = None) -> None:
-    """Load .env before any langfuse import. Idempotent and safe to call repeatedly.
+    """Backward-compat shim. Settings (pydantic-settings) auto-loads the
+    repo-root .env on every Settings() instantiation, so calling this is
+    no longer necessary. Kept as a no-op for any external scripts that
+    import it (langfuse_smoke.py used to call this explicitly).
 
-    Uses repo-root .env by default. Tests and Lambda handlers can override the path.
+    `env_path` is honored by patching dotenv directly, for the rare test
+    that points at a fixture .env file rather than the canonical one.
     """
-    target = env_path if env_path is not None else (_REPO_ROOT / ".env")
-    if target.exists():
-        load_dotenv(target)
-    # If .env is absent, rely on env vars already in the shell (e.g., Lambda).
+    if env_path is not None and env_path.exists():
+        load_dotenv(env_path)
 
 
 def read_langfuse_env(strict: bool = True) -> _EnvTriple:
@@ -71,11 +72,24 @@ def read_langfuse_env(strict: bool = True) -> _EnvTriple:
     then decide whether to no-op or error. The smoke test uses strict=True.
     FastAPI handlers (Phase 2+) use strict=False so a missing Langfuse key
     doesn't crash request handling — tracing degrades gracefully.
+
+    Implementation: thin wrapper over `Settings`. Returns SecretStr-extracted
+    plain strings so existing callers (which pass these into the langfuse
+    SDK constructor as positional/keyword strs) keep working.
     """
-    load_env()
-    public_key = os.environ.get("LANGFUSE_PUBLIC_KEY", "").strip()
-    secret_key = os.environ.get("LANGFUSE_SECRET_KEY", "").strip()
-    host = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com").strip()
+    from dossier.core.settings import get_settings  # noqa: PLC0415 — defer to avoid import cycle
+    settings = get_settings()
+    public_key = (
+        settings.langfuse_public_key.get_secret_value()
+        if settings.langfuse_public_key is not None
+        else ""
+    ).strip()
+    secret_key = (
+        settings.langfuse_secret_key.get_secret_value()
+        if settings.langfuse_secret_key is not None
+        else ""
+    ).strip()
+    host = settings.langfuse_host.strip()
 
     if strict and (not public_key or not secret_key):
         missing = [

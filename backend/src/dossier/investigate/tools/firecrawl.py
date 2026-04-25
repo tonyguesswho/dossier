@@ -25,12 +25,11 @@ Installed-API note (2026-04-22, firecrawl-py 4.22.3):
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 from urllib.parse import urlparse
 
 from dossier.investigate.tools.types import ToolResult
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +40,8 @@ _FIRECRAWL_TIMEOUT_MS: int = 30_000  # 30s per ARCHITECTURE.md §10
 
 
 def read_firecrawl_env(strict: bool = True) -> str:
-    load_env()
-    key = os.environ.get("FIRECRAWL_API_KEY", "").strip()
+    """Thin wrapper over Settings.firecrawl_api_key for backward compat."""
+    key = get_settings().firecrawl_api_key.get_secret_value().strip()
     if strict and not key:
         raise RuntimeError(
             "FIRECRAWL_API_KEY not set. Copy .env.example to .env and paste key "

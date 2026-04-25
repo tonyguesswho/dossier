@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -57,6 +56,7 @@ from dossier.api.schemas import (
     SourceListItem,
 )
 from dossier.core.db import get_engine
+from dossier.core.settings import get_settings
 from dossier.investigate.render import HINT_SEPARATOR
 
 logger = logging.getLogger(__name__)
@@ -176,7 +176,7 @@ def _dispatch_lambda(investigation_id: UUID) -> None:
     """
     import boto3  # noqa: PLC0415 — intentional lazy import
 
-    function_name = os.environ.get("LAMBDA_FUNCTION_NAME")
+    function_name = get_settings().lambda_function_name
     if not function_name:
         raise RuntimeError(
             "LAMBDA_FUNCTION_NAME env var required when DOSSIER_DISPATCH_MODE=lambda"
@@ -205,12 +205,13 @@ def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID
     Read at call time (not at import time) so flipping the env var in tests or
     between local uvicorn runs takes effect without a process restart.
     """
-    mode = os.environ.get("DOSSIER_DISPATCH_MODE", "local").lower()
+    mode = get_settings().dispatch_mode
     if mode == "lambda":
         _dispatch_lambda(investigation_id)
     elif mode == "local":
         _dispatch_local(background_tasks, investigation_id)
     else:
+        # Pydantic Literal validation should make this branch unreachable.
         raise RuntimeError(
             f"unknown DOSSIER_DISPATCH_MODE={mode!r}; expected 'local' or 'lambda'"
         )

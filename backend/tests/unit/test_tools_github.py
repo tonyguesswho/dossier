@@ -89,8 +89,12 @@ def test_fail_open_on_search_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_unauthed_headers_omit_authorization(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-    monkeypatch.setattr(gh_module, "load_env", lambda: None)
+    # GITHUB_TOKEN is optional — github.read_github_env returns "" when unset
+    # and _headers omits Authorization. Set it to empty string explicitly:
+    # env vars take precedence over .env file in pydantic-settings, so this
+    # overrides any token in the developer's local .env without disabling
+    # the env_file (which would also strip the other required vars).
+    monkeypatch.setenv("GITHUB_TOKEN", "")
     headers = gh_module._headers(gh_module.read_github_env(strict=False))
     assert "Authorization" not in headers
     assert headers["Accept"] == "application/vnd.github+json"

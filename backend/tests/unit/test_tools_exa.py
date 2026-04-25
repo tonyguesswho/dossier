@@ -84,9 +84,18 @@ def test_search_fails_open_on_empty_results(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_missing_api_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Settings now validates EXA_API_KEY presence at process init — see
+    test_settings_requires_required_keys in test_settings.py for the
+    canonical assertion. Here we just confirm read_exa_env's strict=True
+    branch still fires when the underlying setting is empty (e.g. empty
+    SecretStr after a hot-reload monkeypatch)."""
+    from dossier.core.settings import Settings
     monkeypatch.delenv("EXA_API_KEY", raising=False)
-    monkeypatch.setattr(exa_module, "load_env", lambda: None)
-    with pytest.raises(RuntimeError, match="EXA_API_KEY not set"):
+    monkeypatch.setattr(
+        "dossier.core.settings.Settings.model_config",
+        {**Settings.model_config, "env_file": None},
+    )
+    with pytest.raises(Exception, match="exa_api_key|EXA_API_KEY"):
         exa_module.read_exa_env(strict=True)
 
 

@@ -18,9 +18,9 @@ from dossier.core.llm import (
     STRONG_MODEL_ID,
     cheap_model,
     embedding_model,
-    read_openrouter_env,
     strong_model,
 )
+from dossier.core.settings import Settings
 
 
 # ---------------------------------------------------------------------------
@@ -42,31 +42,26 @@ def test_embedding_and_cheap_model_getters() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Case 3: strict=True raises on missing key (D-09 fail-fast for synthesizer)
+# Case 3: Settings raises ValidationError on missing OPENROUTER_API_KEY.
+# Replaces the legacy `read_openrouter_env(strict=True)` raise check —
+# the validation now happens at process start, not per-call.
 # ---------------------------------------------------------------------------
-def test_strict_raises_on_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settings_requires_openrouter_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    # Also block load_env from reading .env in CI — point it at an empty temp dir.
-    monkeypatch.setattr("dossier.core.llm.load_env", lambda: None)
-    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY not set"):
-        read_openrouter_env(strict=True)
+    # Block .env file fallback so monkeypatch.delenv actually takes effect.
+    monkeypatch.setattr(
+        "dossier.core.settings.Settings.model_config",
+        {**Settings.model_config, "env_file": None},
+    )
+    with pytest.raises(Exception, match="openrouter_api_key|OPENROUTER_API_KEY"):
+        Settings()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
-# Case 4: strict=False returns empty string on missing key (graceful degrade)
-# ---------------------------------------------------------------------------
-def test_non_strict_returns_empty_on_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setattr("dossier.core.llm.load_env", lambda: None)
-    assert read_openrouter_env(strict=False) == ""
-
-
-# ---------------------------------------------------------------------------
-# Case 5: strong_model() builds an OpenAI client with correct base_url
+# Case 4: strong_model() builds an OpenAI client with correct base_url
 # ---------------------------------------------------------------------------
 def test_strong_model_configures_openrouter_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-fake")
-    monkeypatch.setattr("dossier.core.llm.load_env", lambda: None)
     client = strong_model()
     # openai>=2.7 exposes base_url on the client (as a URL-like object with str()).
     assert str(client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"

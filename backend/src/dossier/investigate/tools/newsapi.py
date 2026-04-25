@@ -25,11 +25,11 @@ eval-set reruns.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+from dossier.core.settings import get_settings
 from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -77,7 +77,7 @@ async def search(company: str, context_hint: str | None = None) -> list[ToolResu
         list[ToolResult] with source_kind='news'. Empty list on any failure
         (missing API key, network error after retries, empty response body).
     """
-    api_key = os.environ.get("NEWSAPI_API_KEY")
+    api_key = get_settings().newsapi_api_key
     if not api_key:
         logger.warning("newsapi.search: NEWSAPI_API_KEY not set — skipping news search")
         return []

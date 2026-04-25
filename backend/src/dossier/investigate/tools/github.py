@@ -19,7 +19,6 @@ Rejected alternatives:
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import httpx
@@ -31,7 +30,7 @@ from tenacity import (
 )
 
 from dossier.investigate.tools.types import ToolResult
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +39,14 @@ GITHUB_TIMEOUT_S: float = 15.0
 
 
 def read_github_env(strict: bool = False) -> str:
-    load_env()
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    """Thin wrapper over Settings.github_token for backward compat.
+
+    Returns empty string when the token isn't configured — _headers() then
+    omits Authorization and we fall back to unauthenticated GitHub at
+    60 req/hr (still useful for low-volume founder searches).
+    """
+    token_secret = get_settings().github_token
+    token = token_secret.get_secret_value().strip() if token_secret is not None else ""
     if strict and not token:
         raise RuntimeError(
             "GITHUB_TOKEN not set. Generate a PAT at https://github.com/settings/tokens "

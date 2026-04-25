@@ -26,7 +26,6 @@ Installed-API note (2026-04-22):
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 from tenacity import (
@@ -37,14 +36,16 @@ from tenacity import (
 )
 
 from dossier.investigate.tools.types import ToolResult
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
 
 def read_exa_env(strict: bool = True) -> str:
-    load_env()
-    key = os.environ.get("EXA_API_KEY", "").strip()
+    """Thin wrapper over Settings.exa_api_key for backward compat. Settings
+    already validates presence at process start, so strict-mode raise is now
+    a defensive guard against the (rare) case of an empty SecretStr."""
+    key = get_settings().exa_api_key.get_secret_value().strip()
     if strict and not key:
         raise RuntimeError(
             "EXA_API_KEY not set. Copy .env.example to .env and paste key from "

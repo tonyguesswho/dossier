@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
 import sys
 
@@ -33,7 +32,7 @@ from sqlalchemy import create_engine, text
 
 from dossier.eval.companies import EVAL_COMPANIES, EvalCompany, split_summary
 from dossier.models import GoldClaim
-from dossier.observability import load_env
+from dossier.core.settings import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -149,9 +148,11 @@ def upsert_eval_items(database_url: str) -> dict[str, int]:
 
 
 def main() -> int:
-    load_env()
-    database_url = os.environ.get("DATABASE_URL")
-    if not database_url:
+    # Settings raises ValidationError if DATABASE_URL is missing — friendlier
+    # CLI experience to catch that here and print the same legacy message.
+    try:
+        database_url = get_settings().database_url
+    except Exception:  # noqa: BLE001 — pydantic.ValidationError + sub-types
         print(
             "ERROR: DATABASE_URL not set. Copy .env.example to .env and fill local creds.",
             file=sys.stderr,

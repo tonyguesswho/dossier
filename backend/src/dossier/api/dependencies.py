@@ -30,7 +30,6 @@ Phase coverage:
 """
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
@@ -40,7 +39,7 @@ from fastapi_clerk_auth import (
     HTTPAuthorizationCredentials,
 )
 
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 # Module-level cache for the ClerkHTTPBearer guard. Built lazily on first
 # request that reaches require_clerk_user_id so that:
@@ -69,8 +68,7 @@ def _get_clerk_guard() -> ClerkHTTPBearer | None:
     if _CLERK_GUARD_BUILT:
         return _CLERK_GUARD_CACHE
 
-    load_env()
-    jwks_url = os.environ.get("CLERK_JWKS_URL", "").strip()
+    jwks_url = get_settings().clerk_jwks_url.strip()
     if not jwks_url:
         _CLERK_GUARD_CACHE = None
     else:
@@ -94,8 +92,7 @@ async def _verify_clerk_credentials(
     (single `request` param) that doesn't confuse FastAPI's body-field
     introspection when used as a sub-dependency via `Depends(...)`.
     """
-    load_env()
-    dev_bypass = os.environ.get("DOSSIER_AUTH_DEV_BYPASS", "").strip()
+    dev_bypass = get_settings().dossier_auth_dev_bypass.strip()
     if dev_bypass:
         return dev_bypass
 

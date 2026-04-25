@@ -27,11 +27,9 @@ Phase coverage:
 """
 from __future__ import annotations
 
-import os
-
 from openai import OpenAI
 
-from dossier.observability import load_env
+from dossier.core.settings import get_settings
 
 # Locked model IDs (STACK.md §2.5; change requires CONTEXT.md decision event).
 STRONG_MODEL_ID: str = "anthropic/claude-sonnet-4.5"
@@ -44,30 +42,15 @@ CHEAP_MODEL_ID: str = "anthropic/claude-haiku-4.5"  # Reserved for Phase 3 per D
 OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"  # CLAUDE.md lock.
 
 
-def read_openrouter_env(strict: bool = True) -> str:
-    """Return the OPENROUTER_API_KEY. strict=True raises on missing key.
-
-    Strict mode is for the synthesizer (which cannot work without an LLM).
-    Non-strict mode is for health-check routes that should not 500 on a
-    missing key during local dev — degrades gracefully.
-    """
-    load_env()
-    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    if strict and not api_key:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY not set. Copy .env.example to .env and paste key "
-            "from https://openrouter.ai/keys."
-        )
-    return api_key
-
-
 def strong_model() -> OpenAI:
     """Return an openai.OpenAI client routed to OpenRouter.
 
     Callers use this for synthesis (D-03: openai.beta.chat.completions.parse
-    against the Brief Pydantic schema).
+    against the Brief Pydantic schema). API key sourced from Settings — pydantic
+    validation already raised at process start if it's missing, so no per-call
+    strict-check needed.
     """
-    api_key = read_openrouter_env(strict=True)
+    api_key = get_settings().openrouter_api_key.get_secret_value()
     # base_url="https://openrouter.ai/api/v1" — CLAUDE.md / PLAT-03 lock.
     return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
 
@@ -84,19 +67,6 @@ def embedding_model() -> str:
     return EMBEDDING_MODEL_ID
 
 
-def read_openai_api_key(strict: bool = True) -> str:
-    """Return OPENAI_API_KEY for direct (non-OpenRouter) embedding calls."""
-    load_env()
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if strict and not api_key:
-        raise RuntimeError(
-            "OPENAI_API_KEY not set. Required for embeddings — OpenRouter does "
-            "not proxy /v1/embeddings. Add the key to .env; get one at "
-            "https://platform.openai.com/api-keys."
-        )
-    return api_key
-
-
 def embedding_client() -> OpenAI:
     """Return an openai.OpenAI client pointed at api.openai.com (no base_url override).
 
@@ -104,7 +74,7 @@ def embedding_client() -> OpenAI:
     embeddings. Keeps chat/synth traffic on OpenRouter for unified billing while
     embeddings go direct.
     """
-    api_key = read_openai_api_key(strict=True)
+    api_key = get_settings().openai_api_key.get_secret_value()
     return OpenAI(api_key=api_key)  # default base_url = https://api.openai.com/v1
 
 
@@ -121,7 +91,5 @@ __all__ = [
     "cheap_model",
     "embedding_client",
     "embedding_model",
-    "read_openai_api_key",
-    "read_openrouter_env",
     "strong_model",
 ]
