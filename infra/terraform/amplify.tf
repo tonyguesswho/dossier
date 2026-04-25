@@ -130,6 +130,37 @@ resource "aws_iam_role_policy_attachment" "amplify_admin" {
   policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess-Amplify"
 }
 
+# -----------------------------------------------------------------------------
+# Runtime (SSR) env vars for the Amplify-managed Lambda.
+#
+# Amplify's `environment_variables` on the app resource are BUILD-time only
+# (used to inline NEXT_PUBLIC_* into the JS bundle). The SSR Lambda that
+# answers requests at runtime can't see them unless they're stored as SSM
+# parameters under the magic path `/amplify/<app_id>/<branch>/<KEY>`. Amplify
+# auto-syncs that path to the SSR runtime on every deployment.
+#
+# CLERK_SECRET_KEY is the only one we strictly need at runtime — the route
+# handlers' `auth().getToken()` call requires it. NEXT_PUBLIC_BACKEND_URL is
+# server-readable via the inlined build but we mirror it here for safety so
+# server actions / route handlers can also reach it via process.env.
+# -----------------------------------------------------------------------------
+
+resource "aws_ssm_parameter" "amplify_runtime_clerk_secret" {
+  count = local.amplify_enabled ? 1 : 0
+  name  = "/amplify/${aws_amplify_app.frontend[0].id}/${var.amplify_branch}/CLERK_SECRET_KEY"
+  type  = "SecureString"
+  value = lookup(var.amplify_frontend_env_vars, "CLERK_SECRET_KEY", "")
+  tier  = "Standard"
+}
+
+resource "aws_ssm_parameter" "amplify_runtime_backend_url" {
+  count = local.amplify_enabled ? 1 : 0
+  name  = "/amplify/${aws_amplify_app.frontend[0].id}/${var.amplify_branch}/NEXT_PUBLIC_BACKEND_URL"
+  type  = "String"
+  value = lookup(var.amplify_frontend_env_vars, "NEXT_PUBLIC_BACKEND_URL", "")
+  tier  = "Standard"
+}
+
 output "amplify_app_id" {
   value       = local.amplify_enabled ? aws_amplify_app.frontend[0].id : null
   description = "Amplify app ID. Use with `aws amplify` CLI (e.g. start-job)."
