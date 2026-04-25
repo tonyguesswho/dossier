@@ -75,7 +75,15 @@ resource "aws_amplify_app" "frontend" {
 
   # NEXT_PUBLIC_* + Clerk vars injected at build time (NEXT_PUBLIC_* are
   # inlined into the JS bundle by the Next.js compiler).
-  environment_variables = var.amplify_frontend_env_vars
+  # Monorepo signal: AMPLIFY_MONOREPO_APP_ROOT tells WEB_COMPUTE platform
+  # where to find package.json. Without it the build clones the repo, sees
+  # backend/ + frontend/ + infra/ at root, can't read 'next' version, fails
+  # with "CustomerError: Cannot read 'next' version in package.json".
+  # Merged on top of user-provided vars so a typo upstream can't shadow it.
+  environment_variables = merge(
+    var.amplify_frontend_env_vars,
+    { AMPLIFY_MONOREPO_APP_ROOT = "frontend" },
+  )
 
   tags = {
     Project = var.project_name
