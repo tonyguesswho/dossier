@@ -445,4 +445,31 @@ implementation order if you want to see how any of these landed in code.
 
 ---
 
-*Last updated: capstone day 14, after AWS deploy landed live.*
+## Appendix: known limitations on the Amplify deploy
+
+The Amplify Hosting deploy (Decision context: parallel-to-Vercel
+"two-cloud frontend" story) is provisioned and serves the Next.js build
+correctly at the static layer. However its **SSR runtime Lambda does
+not receive `CLERK_SECRET_KEY`** from `aws_amplify_app.environment_variables`
+— that field is build-time only. Routes that exercise Clerk's
+`auth().getToken()` (which means every authed route handler) 500 with
+`@clerk/nextjs: Missing secretKey`.
+
+We provisioned `aws_ssm_parameter` resources at the magic
+`/amplify/<app_id>/<branch>/<KEY>` path on the assumption Amplify
+auto-syncs them to the SSR runtime. Verified the params exist; the SSR
+Lambda still doesn't see the secret. Likely cause: Amplify Hosting
+introduced a separate "Compute environment variables" feature in late
+2024 that's only exposed via the Console UI and a not-yet-supported
+Terraform resource. Confirming + closing the gap is post-capstone work.
+
+**For the demo:** Vercel is the canonical production frontend
+(`https://dossier-sage-omega.vercel.app`). Amplify's URL serves the
+unauthed pages cleanly but 500s on the chat / investigations routes —
+panel-defensible position is "two-cloud deploy provisioned, Amplify SSR
+env-var sync is a known platform quirk we'd close with a migration to
+the Console-managed Compute env vars feature."
+
+---
+
+*Last updated: capstone day 15, after Amplify deploy + Settings refactor.*
