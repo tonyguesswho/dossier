@@ -46,3 +46,50 @@ variable "env_vars" {
   default     = {}
   sensitive   = true
 }
+
+# -----------------------------------------------------------------------------
+# Amplify (frontend hosting on AWS) — optional, parallel to Vercel.
+# -----------------------------------------------------------------------------
+# Provisioned by amplify.tf when amplify_codeconnections_arn is non-empty. Skip
+# (leave empty) and amplify.tf becomes a no-op so the rest of the stack still
+# applies cleanly without any Amplify resources.
+
+variable "github_oauth_token" {
+  description = <<-EOT
+    GitHub Personal Access Token (classic) with `repo` scope. Empty string
+    disables the Amplify stack — set this to enable AWS Amplify Hosting as
+    a parallel-to-Vercel frontend deploy.
+
+    To create one: github.com/settings/tokens -> Generate new token (classic)
+    -> name 'amplify-dossier' -> select scope: repo (full) -> Generate ->
+    copy the ghp_... value into terraform.tfvars and re-apply.
+
+    Stored only in terraform state + tfvars (both gitignored); never committed.
+  EOT
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "github_repo_url" {
+  description = "GitHub HTTPS URL of the repo Amplify builds from. Ignored when amplify_codeconnections_arn is empty."
+  type        = string
+  default     = "https://github.com/tonyguesswho/dossier"
+}
+
+variable "amplify_branch" {
+  description = "Branch Amplify auto-builds. Production deploys come from this branch's pushes."
+  type        = string
+  default     = "main"
+}
+
+variable "amplify_frontend_env_vars" {
+  description = <<-EOT
+    NEXT_PUBLIC_* + Clerk env vars injected into Amplify's build environment.
+    Mirrors the Vercel project's env vars; values are repeated here so the two
+    deploys stay in sync. NEXT_PUBLIC_BACKEND_URL points at the same Lambda URL.
+  EOT
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}
