@@ -1,8 +1,4 @@
-"""Planner node — sets targeted_sections=[all] on first pass; uses verifier sections on reflection.
-
-Per D-02 / 03-CONTEXT.md §Claude's Discretion: pure Python (no LLM call) for
-the first-pass case; only needs to initialize targeted_sections.
-"""
+"""Planner — initialize targeted_sections to all six on first pass."""
 from __future__ import annotations
 
 import logging
@@ -16,8 +12,7 @@ ALL_SECTIONS = ["founders", "company", "market", "product", "risk", "suggested_q
 async def run(state: DossierState) -> dict:
     logger.info(
         "planner: investigation_id=%s company=%s",
-        state["investigation_id"],
-        state["company"],
+        state["investigation_id"], state["company"],
     )
     return {
         "targeted_sections": ALL_SECTIONS,

@@ -1,15 +1,11 @@
-"""DossierState — shared scratchpad for the investigation LangGraph.
+"""DossierState — shared scratchpad for the investigation graph.
 
-D-01 (03-CONTEXT.md): TypedDict with additive list reducers for fan-out fields.
-List fields use Annotated[list[X], operator.add] so parallel Send branches
-concatenate without last-write-wins races.
+List fields use `Annotated[list[X], operator.add]` so parallel Send branches
+concatenate safely instead of fighting last-write-wins. Scalars replace on
+write per standard TypedDict semantics.
 
-Scalars (investigation_id, company, context_hint, reflection_count,
-should_regather, targeted_sections) replace on write — standard TypedDict
-update semantics.
-
-CRITICAL: Do NOT put raw source text in state. S3 keys and chunk IDs travel
-in state; text lives in S3 and Postgres (ARCHITECTURE.md §9 anti-pattern).
+Do NOT put raw source text in state. Chunk IDs and offsets travel here;
+the text lives in source_chunks and S3.
 """
 from __future__ import annotations
 
@@ -20,47 +16,39 @@ from pydantic import BaseModel
 
 
 class FounderCandidate(BaseModel):
-    """Structured output from D-05 Haiku 4.5 founder extraction."""
-
     name: str
     confidence: str  # 'high' | 'medium' | 'low'
 
 
 class FounderCandidates(BaseModel):
-    """JSON-mode response from founder extraction LLM call (D-05, cap 5)."""
+    """JSON-mode response from the founder-extraction LLM (capped at 5)."""
 
     founders: list[FounderCandidate]
 
 
 class RetrievedChunkRef(BaseModel):
-    """Lightweight chunk reference travelling through graph state.
-
-    text is NOT included — only ids and offsets.
-    Full text lives in source_chunks table and S3.
-    """
-
-    chunk_id: str  # source_chunks.id (UUID as str)
-    source_id: str  # sources.id (UUID as str)
+    chunk_id: str
+    source_id: str
     url: str
     source_kind: str  # 'web'|'github'|'news'|'crawl'|'crunchbase'
     char_start: int
     char_end: int
-    section_hint: str  # which brief section this chunk was retrieved for
+    section_hint: str
 
 
 class DraftClaimRef(BaseModel):
-    """Claim emitted by synthesizer node before grounding."""
+    """Claim emitted by the synthesizer before grounding."""
 
     section: str  # 'founders'|'company'|'market'|'product'|'risk'|'suggested_questions'
     claim_text: str
-    quoted_span: str  # verbatim text the LLM pulled from retrieved content
-    source_chunk_id: str  # which chunk supported this claim
+    quoted_span: str  # verbatim text pulled from retrieved content
+    source_chunk_id: str
 
 
 class GroundedClaimRef(BaseModel):
-    """Claim after finalize node writes it to the claims table."""
+    """Claim after finalize writes it to the claims table."""
 
-    claim_id: str  # claims.id (UUID as str)
+    claim_id: str
     section: str
     claim_text: str
     grounded_source_chunk_id: str | None
@@ -69,27 +57,20 @@ class GroundedClaimRef(BaseModel):
 
 
 class DossierState(TypedDict):
-    """Shared scratchpad. Read D-01 in 03-CONTEXT.md before modifying.
-
-    List fields (founder_candidates, retrieved_chunks, draft_claims,
-    grounded_claims) use operator.add as reducer — parallel Send branches
-    concatenate safely. Scalars replace on write.
-    """
-
-    # --- Scalars (set by planner, read by all nodes) ---
-    investigation_id: str  # UUID as str; thread_id for checkpointer
+    investigation_id: str  # thread_id for the checkpointer
     company: str
     context_hint: str | None
-    input_url: str | None  # present only for 'url' input_type; triggers Firecrawl in Stage 1
-    input_type: str  # 'name' | 'url' | 'deck' — gather_fanout short-circuits on 'deck'
+    input_url: str | None  # set when input_type='url'; triggers Firecrawl
+    input_type: str  # 'name' | 'url' | 'deck'
 
-    # --- Reflection control (D-02) ---
-    reflection_count: int  # incremented by verifier; capped at 2
-    should_regather: bool  # verifier sets True when any section has 0 claims + count < 2
-    targeted_sections: list[str]  # verifier populates; gather_fanout uses for biased queries
+    # Reflection control — verifier increments count, sets regather flag
+    # when a section has zero claims and count < 2.
+    reflection_count: int
+    should_regather: bool
+    targeted_sections: list[str]
 
-    # --- Accumulation fields (additive reducers for fan-out) ---
-    founder_candidates: Annotated[list[str], add]  # names only; max 5 (D-05)
+    # Additive — parallel Send branches concatenate.
+    founder_candidates: Annotated[list[str], add]
     retrieved_chunks: Annotated[list[RetrievedChunkRef], add]
     draft_claims: Annotated[list[DraftClaimRef], add]
     grounded_claims: Annotated[list[GroundedClaimRef], add]
