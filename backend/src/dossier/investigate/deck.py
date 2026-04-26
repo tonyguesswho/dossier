@@ -17,13 +17,13 @@ import io
 import logging
 from uuid import UUID
 
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from pydantic import BaseModel, ConfigDict
 
 from dossier.core.db import get_engine
 from dossier.core.llm import CHEAP_MODEL_ID, strong_model
+from dossier.investigate import repository as repo
 from dossier.investigate.ingest import ingest_tool_results
 from dossier.investigate.tools.types import ToolResult
 
@@ -126,17 +126,7 @@ def run_deck_investigation(
         ingest_tool_results(investigation_id, [synthetic_result], engine=eng)
     except Exception:
         logger.exception("run_deck_investigation: pre-ingest failed")
-        with eng.begin() as conn:
-            conn.execute(
-                text(
-                    "UPDATE investigations "
-                    "SET status = CAST('failed' AS investigation_status), "
-                    "    error = :e, "
-                    "    completed_at = now() "
-                    "WHERE id = :i"
-                ),
-                {"e": "deck ingest failed", "i": str(investigation_id)},
-            )
+        repo.mark_failed_with_error(eng, investigation_id, "deck ingest failed")
         return
 
     asyncio.run(run_graph(str(investigation_id)))

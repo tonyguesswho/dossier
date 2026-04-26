@@ -13,18 +13,17 @@ permanently pollutes the corpus.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
 from dossier.core.llm import STRONG_MODEL_ID, strong_model
+from dossier.investigate import repository as repo
 from dossier.investigate.retrieve import RetrievedChunk, retrieve_top_k
 
 logger = logging.getLogger(__name__)
@@ -121,36 +120,9 @@ def resolve_citations(answer_text: str, url_by_chunk: dict[str, str]) -> str:
     return _CITATION_RE.sub(_replace, answer_text)
 
 
-def _load_url_by_chunk(conn, investigation_id: UUID) -> dict[str, str]:
-    url_rows = conn.execute(
-        text(
-            "SELECT sc.id::text AS chunk_id, s.url AS url "
-            "FROM source_chunks sc "
-            "JOIN sources s ON sc.source_id = s.id "
-            "WHERE s.investigation_id = :inv_id"
-        ),
-        {"inv_id": str(investigation_id)},
-    ).all()
-    return {r.chunk_id: r.url for r in url_rows}
-
-
 # Tuned for text-embedding-3-small: in-corpus matches usually land at
 # 0.15–0.35; 0.4+ typically means we don't have what the user asked about.
 WEAK_RETRIEVAL_DISTANCE = 0.4
-
-
-def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
-    """Pull input_ref, return the bare subject (drops any context hint)."""
-    from dossier.investigate.input_ref import InvestigationInput  # noqa: PLC0415
-    with eng.connect() as conn:
-        row = conn.execute(
-            text("SELECT input_ref FROM investigations WHERE id = :id"),
-            {"id": str(investigation_id)},
-        ).fetchone()
-    if row is None or not row[0]:
-        return None
-    subject = InvestigationInput.parse(row[0]).value.strip()
-    return subject or None
 
 
 def _widen_search(
@@ -173,7 +145,7 @@ def _widen_search(
         logger.exception("chat: widen-search imports failed")
         return 0
 
-    subject = _investigation_subject(eng, investigation_id)
+    subject = repo.get_investigation_subject(eng, investigation_id)
     if not subject:
         # Refuse to widen without a subject — would pollute the corpus with
         # whatever Exa thinks the question is about.
@@ -235,7 +207,7 @@ def run_chat_turn(
     """
     eng = engine if engine is not None else get_engine()
 
-    subject = _investigation_subject(eng, investigation_id)
+    subject = repo.get_investigation_subject(eng, investigation_id)
 
     retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
     top_distance = retrieved[0].distance if retrieved else None
@@ -253,51 +225,29 @@ def run_chat_turn(
 
     if not retrieved:
         empty_reply = "I don't have any source material for this investigation yet."
-        _persist_turn_pair(eng, investigation_id, question, empty_reply, [])
+        repo.insert_chat_turn_pair(
+            eng, investigation_id,
+            user_question=question,
+            assistant_content=empty_reply,
+            cited_chunk_ids=[],
+        )
         return empty_reply, []
 
     answer = answer_with_citations(
         question, retrieved, subject=subject, client=client
     )
 
-    with eng.connect() as conn:
-        url_by_chunk = _load_url_by_chunk(conn, investigation_id)
+    url_by_chunk = repo.url_by_chunk(eng, investigation_id)
     resolved = resolve_citations(answer.answer_text, url_by_chunk)
 
-    _persist_turn_pair(
-        eng, investigation_id, question, resolved, answer.cited_chunk_ids,
+    repo.insert_chat_turn_pair(
+        eng, investigation_id,
+        user_question=question,
+        assistant_content=resolved,
+        cited_chunk_ids=answer.cited_chunk_ids,
     )
 
     return resolved, answer.cited_chunk_ids
-
-
-def _persist_turn_pair(
-    eng: Engine,
-    investigation_id: UUID,
-    user_question: str,
-    assistant_content: str,
-    cited_chunk_ids: list[str],
-) -> None:
-    with eng.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO chat_messages (investigation_id, role, content) "
-                "VALUES (:i, 'user', :q)"
-            ),
-            {"i": str(investigation_id), "q": user_question},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO chat_messages "
-                "(investigation_id, role, content, cited_chunk_ids) "
-                "VALUES (:i, 'assistant', :c, CAST(:cids AS JSONB))"
-            ),
-            {
-                "i": str(investigation_id),
-                "c": assistant_content,
-                "cids": json.dumps(cited_chunk_ids),
-            },
-        )
 
 
 __all__ = [

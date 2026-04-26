@@ -14,8 +14,6 @@ import logging
 from collections import defaultdict
 from uuid import UUID
 
-from sqlalchemy import text
-
 from ..state import DossierState, DraftClaimRef, GroundedClaimRef
 from ..state_accessors import append_grounded_claims
 
@@ -24,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 async def run(state: DossierState) -> dict:
     from dossier.core.db import get_async_session
+    from dossier.investigate import repository as repo
     from dossier.investigate.brief_schema import (
         DB_TO_FIELD,
         BriefClaim,
@@ -74,17 +73,7 @@ async def run(state: DossierState) -> dict:
     url_by_chunk: dict[str, str] = {}
     try:
         async with get_async_session() as session:
-            url_rows_result = await session.execute(
-                text(
-                    "SELECT sc.id::text AS chunk_id, s.url AS url "
-                    "FROM source_chunks sc "
-                    "JOIN sources s ON sc.source_id = s.id "
-                    "WHERE s.investigation_id = CAST(:iid AS UUID)"
-                ),
-                {"iid": investigation_id_str},
-            )
-            if url_rows_result is not None:
-                url_by_chunk = {r.chunk_id: r.url for r in url_rows_result}
+            url_by_chunk = await repo.aurl_by_chunk(session, investigation_id_str)
     except Exception:  # noqa: BLE001 — last-mile render must never poison status
         logger.exception("finalize: url_by_chunk lookup failed; rendering without links")
     brief_md = _brief_to_markdown(brief, url_by_chunk)
@@ -94,37 +83,8 @@ async def run(state: DossierState) -> dict:
     grounded: list[GroundedClaimRef] = []
     async with get_async_session() as session:
         async with session.begin():
-            await session.execute(
-                text(
-                    """
-                    UPDATE investigations
-                    SET status = CAST(:s AS investigation_status),
-                        completed_at = now(),
-                        brief_markdown = :md
-                    WHERE id = CAST(:id AS UUID)
-                    """
-                ),
-                {"s": "complete", "md": brief_md, "id": investigation_id_str},
-            )
-
-            result = await session.execute(
-                text(
-                    """
-                    SELECT
-                        id,
-                        section,
-                        claim_text,
-                        grounded_source_chunk_id,
-                        grounded_span_start,
-                        grounded_span_end
-                    FROM claims
-                    WHERE investigation_id = CAST(:iid AS UUID)
-                      AND grounded_source_chunk_id IS NOT NULL
-                    ORDER BY section, ordinal
-                    """
-                ),
-                {"iid": investigation_id_str},
-            )
+            await repo.acomplete_investigation(session, investigation_id_str, brief_md)
+            result = await repo.alist_grounded_claims(session, investigation_id_str)
             for row in result:
                 grounded.append(
                     GroundedClaimRef(

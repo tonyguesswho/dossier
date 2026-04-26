@@ -28,7 +28,6 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from dossier.investigate.tools.types import ToolResult
 
@@ -243,25 +242,16 @@ async def run(state: DossierState) -> dict:
         )
 
     if injection_chunks:
+        from dossier.investigate import repository as repo  # noqa: PLC0415
         async with get_async_session() as session:
             async with session.begin():
                 for result, chunk_text, reason in injection_chunks:
-                    await session.execute(
-                        text(
-                            """
-                            INSERT INTO injection_attempts
-                                (investigation_id, url, raw_payload, verdict, reason)
-                            VALUES
-                                (CAST(:inv AS UUID), :url, :payload, :verdict, :reason)
-                            """
-                        ),
-                        {
-                            "inv": investigation_id_str,
-                            "url": result.url,
-                            "payload": chunk_text,
-                            "verdict": "injection",
-                            "reason": reason,
-                        },
+                    await repo.ainsert_injection_attempt(
+                        session,
+                        investigation_id_str,
+                        url=result.url,
+                        payload=chunk_text,
+                        reason=reason,
                     )
 
     return {}

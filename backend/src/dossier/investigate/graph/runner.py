@@ -70,9 +70,8 @@ async def _get_checkpointer() -> Any:
 
 async def run_graph(investigation_id: str) -> None:
     """Run the investigation graph. Resumes from checkpoint if interrupted."""
-    from sqlalchemy import text
-
     from dossier.core.db import get_async_session
+    from dossier.investigate import repository as repo
     from dossier.investigate.graph import build_graph
     from dossier.observability import (
         flush_and_shutdown,
@@ -84,14 +83,7 @@ async def run_graph(investigation_id: str) -> None:
 
     from dossier.investigate.input_ref import InvestigationInput  # noqa: PLC0415
     async with get_async_session() as session:
-        result = await session.execute(
-            text(
-                "SELECT input_type, input_ref, langfuse_trace_id "
-                "FROM investigations WHERE id = :id"
-            ),
-            {"id": investigation_id},
-        )
-        row = result.fetchone()
+        row = await repo.aget_investigation_metadata(session, investigation_id)
 
     if not row:
         logger.error("runner: investigation_id=%s not found", investigation_id)
@@ -159,10 +151,7 @@ async def run_graph(investigation_id: str) -> None:
         try:
             async with get_async_session() as session:
                 async with session.begin():
-                    await session.execute(
-                        text("UPDATE investigations SET status='failed' WHERE id = :id"),
-                        {"id": investigation_id},
-                    )
+                    await repo.aupdate_status(session, investigation_id, "failed")
         except Exception:
             logger.exception(
                 "runner: failed to mark investigation_id=%s as failed", investigation_id

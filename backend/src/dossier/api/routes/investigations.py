@@ -1,7 +1,8 @@
 """Investigations API — POST/GET/PATCH/DELETE/re-run.
 
-Every route requires Depends(require_clerk_user_id), scopes SQL on
-`user_id = :clerk_user_id`, and uses parameterized text() (no string concat).
+Every route requires Depends(require_clerk_user_id). All SQL goes through
+`dossier.investigate.repository`, which owns the auth-scoping discipline
+(`AND user_id = :u`).
 
 POST dispatches the pipeline via DOSSIER_DISPATCH_MODE:
   - "local" (default): FastAPI BackgroundTasks runs the graph in-process.
@@ -19,7 +20,6 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.api.dependencies import require_clerk_user_id
@@ -41,7 +41,9 @@ from dossier.api.schemas import (
 )
 from dossier.core.db import get_engine
 from dossier.core.settings import get_settings
+from dossier.investigate import repository as repo
 from dossier.investigate.input_ref import InvestigationInput
+from dossier.investigate.scorecard import compute_scorecard
 
 logger = logging.getLogger(__name__)
 
@@ -55,39 +57,15 @@ def _engine() -> Engine:
 
 
 def _check_rate_limit(eng: Engine, clerk_user_id: str) -> None:
-    with eng.connect() as conn:
-        count = conn.execute(
-            text(
-                "SELECT COUNT(*) FROM investigations "
-                "WHERE user_id = :u AND started_at > now() - interval '1 day'"
-            ),
-            {"u": clerk_user_id},
-        ).scalar_one()
-    if count >= RATE_LIMIT_PER_24H:
+    if repo.count_recent_24h(eng, clerk_user_id) >= RATE_LIMIT_PER_24H:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="rate_limited",
         )
 
 
-def _ensure_user_exists(eng: Engine, clerk_user_id: str) -> None:
-    with eng.begin() as conn:
-        conn.execute(
-            text("INSERT INTO users (id) VALUES (:u) ON CONFLICT DO NOTHING"),
-            {"u": clerk_user_id},
-        )
-
-
 def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id: str):
-    with eng.connect() as conn:
-        row = conn.execute(
-            text(
-                "SELECT id, user_id, status, input_type, input_ref, started_at, "
-                "       completed_at, brief_markdown, error "
-                "FROM investigations WHERE id = :id AND user_id = :u"
-            ),
-            {"id": str(investigation_id), "u": clerk_user_id},
-        ).fetchone()
+    row = repo.get_investigation_for_user(eng, investigation_id, clerk_user_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not_found")
     return row
@@ -164,21 +142,18 @@ def create_investigation(
             detail="guardrail_rejected",
         ) from exc
 
-    _ensure_user_exists(eng, clerk_user_id)
+    repo.upsert_user(eng, clerk_user_id)
 
     investigation_id = uuid4()
     input_ref = InvestigationInput(value=normalized, context_hint=body.context_hint).serialize()
 
-    with eng.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO investigations (id, user_id, status, input_type, input_ref)
-                VALUES (:id, :u, 'queued', :k, :v)
-                """
-            ),
-            {"id": str(investigation_id), "u": clerk_user_id, "k": body.kind, "v": input_ref},
-        )
+    repo.insert_investigation(
+        eng,
+        investigation_id=investigation_id,
+        user_id=clerk_user_id,
+        kind=body.kind,
+        input_ref=input_ref,
+    )
 
     _dispatch_pipeline(background_tasks, investigation_id)
 
@@ -238,7 +213,7 @@ def upload_deck_investigation(
     if not markdown.strip():
         raise HTTPException(status_code=422, detail="pdf_no_text_extracted")
 
-    _ensure_user_exists(eng, clerk_user_id)
+    repo.upsert_user(eng, clerk_user_id)
 
     investigation_id = uuid4()
     # Extract subject company from the cover slide via Haiku — using the
@@ -264,14 +239,13 @@ def upload_deck_investigation(
         value=display_value, context_hint=" | ".join(hint_parts) or None
     ).serialize()
 
-    with eng.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO investigations (id, user_id, status, input_type, input_ref) "
-                "VALUES (:id, :u, 'queued', 'deck', :v)"
-            ),
-            {"id": str(investigation_id), "u": clerk_user_id, "v": input_ref},
-        )
+    repo.insert_investigation(
+        eng,
+        investigation_id=investigation_id,
+        user_id=clerk_user_id,
+        kind="deck",
+        input_ref=input_ref,
+    )
 
     # Pinned to local dispatch — deck markdown isn't persisted to S3 and the
     # 256 KB Event-invoke payload limit can't carry it.
@@ -287,15 +261,7 @@ def list_investigations(
     clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
 ) -> InvestigationListResponse:
     eng = _engine()
-    with eng.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT id, input_ref, status, started_at "
-                "FROM investigations WHERE user_id = :u "
-                "ORDER BY started_at DESC"
-            ),
-            {"u": clerk_user_id},
-        ).fetchall()
+    rows = repo.list_investigations_for_user(eng, clerk_user_id)
     items = [
         InvestigationListItem(
             id=r.id,
@@ -316,15 +282,8 @@ def get_status(
     eng = _engine()
     row = _load_user_investigation(eng, investigation_id, clerk_user_id)
 
-    with eng.connect() as conn:
-        sources_count = conn.execute(
-            text("SELECT COUNT(*) FROM sources WHERE investigation_id = :id"),
-            {"id": str(investigation_id)},
-        ).scalar_one()
-        claims_count = conn.execute(
-            text("SELECT COUNT(*) FROM claims WHERE investigation_id = :id"),
-            {"id": str(investigation_id)},
-        ).scalar_one()
+    sources_count = repo.count_sources(eng, investigation_id)
+    claims_count = repo.count_claims(eng, investigation_id)
 
     return InvestigationStatusResponse(
         id=row.id,
@@ -351,16 +310,14 @@ def get_brief(
             detail={"detail": "not_ready", "status": row.status},
         )
 
-    with eng.connect() as conn:
-        sources = conn.execute(
-            text(
-                "SELECT id, url, source_kind FROM sources "
-                "WHERE investigation_id = :id ORDER BY fetched_at ASC"
-            ),
-            {"id": str(investigation_id)},
-        ).fetchall()
+    sources = repo.list_sources(eng, investigation_id)
 
-    scorecard = _compute_scorecard(eng, investigation_id) if row.status == "complete" else None
+    scorecard: ScorecardResponse | None = None
+    if row.status == "complete":
+        rows = repo.claim_grounding_rows(eng, investigation_id)
+        scorecard_data = compute_scorecard(rows)
+        if scorecard_data is not None:
+            scorecard = ScorecardResponse(**scorecard_data)
 
     return InvestigationBriefResponse(
         id=row.id,
@@ -374,51 +331,6 @@ def get_brief(
     )
 
 
-def _compute_scorecard(eng: Engine, investigation_id: UUID) -> ScorecardResponse | None:
-    """Citation precision + grounding rate for one investigation.
-
-    grounded_span_start/end are SOURCE-absolute; chunk.text is local — translate
-    via chunk_char_start when checking the substring match.
-    """
-    from dossier.core.text_normalize import normalize  # noqa: PLC0415
-    with eng.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT c.claim_text, c.grounded_source_chunk_id::text AS chunk_id, "
-                "       c.grounded_span_start, c.grounded_span_end, "
-                "       sc.text AS chunk_text, sc.char_start AS chunk_char_start "
-                "FROM claims c "
-                "LEFT JOIN source_chunks sc ON c.grounded_source_chunk_id = sc.id "
-                "WHERE c.investigation_id = :iid"
-            ),
-            {"iid": str(investigation_id)},
-        ).all()
-    if not rows:
-        return None
-    total = len(rows)
-    grounded = 0
-    hits = 0
-    for r in rows:
-        if r.chunk_id and r.chunk_text is not None and r.grounded_span_start is not None:
-            grounded += 1
-            local_start = r.grounded_span_start - (r.chunk_char_start or 0)
-            local_end = r.grounded_span_end - (r.chunk_char_start or 0)
-            quoted = r.chunk_text[local_start:local_end]
-            if quoted:
-                nq = normalize(quoted)
-                nc = normalize(r.chunk_text)
-                if nq and nq in nc:
-                    hits += 1
-    precision = (hits / grounded) if grounded else 0.0
-    grounding_rate = (grounded / total) if total else 0.0
-    return ScorecardResponse(
-        citation_precision=precision,
-        grounding_rate=grounding_rate,
-        total_claims=total,
-        grounded_claims=grounded,
-    )
-
-
 @router.get("/{investigation_id}/chat", response_model=ChatHistoryResponse)
 def get_chat_history(
     investigation_id: UUID,
@@ -426,16 +338,7 @@ def get_chat_history(
 ) -> ChatHistoryResponse:
     eng = _engine()
     _load_user_investigation(eng, investigation_id, clerk_user_id)
-    with eng.connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT role, content, cited_chunk_ids, created_at "
-                "FROM chat_messages "
-                "WHERE investigation_id = :id "
-                "ORDER BY created_at ASC"
-            ),
-            {"id": str(investigation_id)},
-        ).all()
+    rows = repo.list_chat_messages(eng, investigation_id)
     messages = [
         ChatMessageItem(
             role=r.role,
@@ -484,11 +387,7 @@ def rename_investigation(
         .serialize()
     )
 
-    with eng.begin() as conn:
-        conn.execute(
-            text("UPDATE investigations SET input_ref = :v WHERE id = :id AND user_id = :u"),
-            {"v": new_input_ref, "id": str(investigation_id), "u": clerk_user_id},
-        )
+    repo.update_input_ref(eng, investigation_id, clerk_user_id, new_input_ref)
 
     return InvestigationListItem(
         id=row.id,
@@ -505,13 +404,7 @@ def delete_investigation(
 ) -> None:
     eng = _engine()
     _load_user_investigation(eng, investigation_id, clerk_user_id)
-
-    # ON DELETE CASCADE on sources → source_chunks; investigations → claims.
-    with eng.begin() as conn:
-        conn.execute(
-            text("DELETE FROM investigations WHERE id = :id AND user_id = :u"),
-            {"id": str(investigation_id), "u": clerk_user_id},
-        )
+    repo.delete_investigation_for_user(eng, investigation_id, clerk_user_id)
 
 
 @router.post("/{investigation_id}/re-run", status_code=status.HTTP_202_ACCEPTED, response_model=ReRunResponse)
@@ -526,22 +419,14 @@ def re_run_investigation(
     _check_rate_limit(eng, clerk_user_id)
 
     new_id = uuid4()
-    with eng.begin() as conn:
-        conn.execute(
-            text(
-                """
-                INSERT INTO investigations (id, user_id, status, input_type, input_ref, re_run_of)
-                VALUES (:id, :u, 'queued', :k, :v, :orig)
-                """
-            ),
-            {
-                "id": str(new_id),
-                "u": clerk_user_id,
-                "k": original.input_type,
-                "v": original.input_ref,
-                "orig": str(investigation_id),
-            },
-        )
+    repo.insert_investigation(
+        eng,
+        investigation_id=new_id,
+        user_id=clerk_user_id,
+        kind=original.input_type,
+        input_ref=original.input_ref,
+        re_run_of=investigation_id,
+    )
 
     _dispatch_pipeline(background_tasks, new_id)
     return ReRunResponse(id=new_id, status="queued")

@@ -13,8 +13,6 @@ import asyncio
 import logging
 from uuid import UUID
 
-from sqlalchemy import text
-
 from ..state import DossierState, DraftClaimRef
 from ..state_accessors import append_draft_claims
 
@@ -24,6 +22,7 @@ logger = logging.getLogger(__name__)
 async def run(state: DossierState) -> dict:
     """Returns {"draft_claims": [...]} — verifier inspects per-section coverage."""
     from dossier.core.db import get_async_session
+    from dossier.investigate import repository as repo
     from dossier.investigate.brief_schema import FIELD_TO_DB
     from dossier.investigate.retrieve import retrieve_top_k
     from dossier.investigate.synthesize import synthesize_brief
@@ -57,14 +56,7 @@ async def run(state: DossierState) -> dict:
 
     async with get_async_session() as session:
         async with session.begin():
-            await session.execute(
-                text(
-                    "UPDATE investigations "
-                    "SET status = CAST(:s AS investigation_status) "
-                    "WHERE id = CAST(:id AS UUID)"
-                ),
-                {"s": "synthesizing", "id": investigation_id_str},
-            )
+            await repo.aupdate_status(session, investigation_id_str, "synthesizing")
 
     draft_claims: list[DraftClaimRef] = []
     for field_name, db_section in FIELD_TO_DB.items():
