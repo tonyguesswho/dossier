@@ -1,28 +1,9 @@
-"""Crunchbase free-tier enrichment wrapper for Phase 3 Stage-2 fan-out (D-04).
+"""Crunchbase free-tier wrapper — basic org metadata via autocomplete + entity.
 
-Crunchbase provides basic company metadata (description, funding, employees,
-founded date) via their autocomplete + organization entity endpoints. Treat
-as optional enrichment — if the free tier rate-limits or the API key is
-missing, fail-open (return []) rather than crash the investigation.
-
-Implementation notes:
-  - Uses httpx (transitive dep via openai-python / firecrawl-py). Deferred
-    import inside the fetch function so unit tests can monkeypatch
-    httpx.AsyncClient without reloading this module (mirrors exa.py pattern).
-  - No tenacity retry here — Crunchbase free tier's aggressive rate-limiting
-    makes retries counterproductive (each 429 burns quota). One attempt per
-    investigation; on failure log + fall through to empty result.
-  - CRUNCHBASE_API_KEY is optional. Unauthenticated calls work at low QPS
-    against the public autocomplete endpoint; an API key upgrades to the
-    authenticated rate bucket.
-
-Rate limits (free tier): aggressive and undocumented. Phase 3 budget: one
-query per investigation (autocomplete → org lookup = 2 HTTP calls total).
-
-Fail-open policy: any error (network, HTTP 4xx/5xx, empty response, missing
-permalink) → log + return []. Matches github.py's two-stage fail-open: the
-search step fails open entirely, downstream enrichment failures short-circuit
-to whatever partial data was collected.
+Optional enrichment. Aggressive undocumented rate limits on the free tier
+make tenacity retries counterproductive (each 429 burns quota), so this is
+single-attempt fail-open. CRUNCHBASE_API_KEY is optional; without it we hit
+the public autocomplete endpoint at low QPS.
 """
 from __future__ import annotations
 
@@ -37,17 +18,12 @@ logger = logging.getLogger(__name__)
 
 _CRUNCHBASE_BASE = "https://api.crunchbase.com/api/v4"
 _CRUNCHBASE_AUTOCOMPLETE = "https://autocomplete.crunchbase.com/v4/autocomplete"
-_CB_USER_KEY_ENV = "CRUNCHBASE_API_KEY"  # optional; unauthenticated works at low QPS
 
 
 async def _fetch_org_summary(
     company: str, api_key: str | None
 ) -> dict[str, Any] | None:
-    """Two-step Crunchbase lookup: autocomplete → org entity properties.
-
-    Returns the raw properties dict or None on any failure (missing permalink,
-    HTTP error, empty response).
-    """
+    """autocomplete → org entity. Returns properties dict or None."""
     import httpx  # noqa: PLC0415 — deferred for monkeypatch safety
 
     ac_params: dict[str, Any] = {
@@ -86,29 +62,22 @@ async def _fetch_org_summary(
             org_r.raise_for_status()
             return org_r.json().get("properties") or {}
     except httpx.HTTPError as exc:
-        logger.info("crunchbase._fetch_org_summary: HTTP error for %r: %s", company, exc)
+        logger.info("crunchbase: HTTP error for %r: %s", company, exc)
         return None
 
 
 async def search(company: str) -> list[ToolResult]:
-    """Fetch basic Crunchbase org profile for `company`.
-
-    Returns a single-element list[ToolResult] with source_kind='crunchbase',
-    or [] on any failure. Fail-open is mandatory here: Crunchbase is optional
-    enrichment (T-03-04-04), not a required source.
-    """
+    """Fetch a basic Crunchbase org profile. Returns [] on any failure."""
     api_key = get_settings().crunchbase_api_key or None
 
     try:
         org_data = await _fetch_org_summary(company, api_key)
-    except Exception:  # noqa: BLE001 — fail-open on any unexpected error
-        logger.warning(
-            "crunchbase.search: unexpected error for company=%r", company, exc_info=True
-        )
+    except Exception:  # noqa: BLE001 — fail-open
+        logger.warning("crunchbase.search: unexpected error for %r", company, exc_info=True)
         return []
 
     if not org_data:
-        logger.info("crunchbase.search: no org found for company=%r", company)
+        logger.info("crunchbase.search: no org for %r", company)
         return []
 
     description = org_data.get("short_description") or ""
@@ -146,16 +115,16 @@ async def search(company: str) -> list[ToolResult]:
         logger.info("crunchbase.search: org found but all fields empty for %r", company)
         return []
 
-    result = ToolResult(
-        url=website,
-        source_kind="crunchbase",
-        text=text,
-        title=f"{company} — Crunchbase",
-        fetched_at=datetime.now(timezone.utc),
-        raw_metadata=org_data,
-    )
-    logger.info("crunchbase.search: found org data for company=%r", company)
-    return [result]
+    return [
+        ToolResult(
+            url=website,
+            source_kind="crunchbase",
+            text=text,
+            title=f"{company} — Crunchbase",
+            fetched_at=datetime.now(timezone.utc),
+            raw_metadata=org_data,
+        )
+    ]
 
 
 __all__ = ["search"]

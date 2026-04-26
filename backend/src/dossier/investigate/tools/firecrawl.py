@@ -1,26 +1,12 @@
-"""Firecrawl wrapper — deep-crawl the seed URL when Exa excerpts are thin.
+"""Firecrawl wrapper for deep-crawling a seed URL when Exa excerpts are thin.
 
-Budget: ≤1 crawl per investigation (CONTEXT.md D-13). 500 free credits/mo must
-stretch across Phase 2 dev + Phase 4 eval runs (10 companies × potential retries).
+Budget: ≤1 crawl per investigation — 500 free credits/mo has to stretch
+across dev, eval reruns, and the demo. The wrapper enforces the budget;
+when to invoke is the caller's call.
 
-When to call: pipeline.py's discretion — CONTEXT.md §Claude's Discretion offers
-heuristics (e.g., always crawl seed URL if input_type='url'; crawl if Exa returns
-only one page for the seed domain). The wrapper itself is pure — it enforces the
-budget but doesn't decide when to invoke.
-
-Rejected alternatives:
-  - Crawl every URL Exa returns: blows the 500-credit budget in 5 runs.
-  - Skip Firecrawl entirely: Exa excerpts of JS-rendered landing pages are
-    often just "Loading..." — Firecrawl is the escape hatch.
-  - requests-html / BeautifulSoup: no JS rendering. Firecrawl is the SaaS for it.
-
-Installed-API note (2026-04-22, firecrawl-py 4.22.3):
-  `firecrawl.FirecrawlApp` is aliased to the v2 `firecrawl.Firecrawl` class.
-  The v2 client uses `app.scrape(url, formats=[...], timeout=...)` (keyword args)
-  and returns `firecrawl.v2.types.Document` — a Pydantic object with `.markdown`
-  and `.metadata.title` attrs. The v1 `app.scrape_url(url, params={...})` and
-  the dict-shaped response from earlier plans are obsolete here — the wrapper
-  supports both attr-access AND dict-access for defensive/test-double safety.
+firecrawl-py 4.x exposes `app.scrape(url, formats=[...], timeout=ms)` returning
+a Document with `.markdown` and `.metadata.title`. Older SDKs and test doubles
+hand back a dict — we accept both shapes.
 """
 from __future__ import annotations
 
@@ -33,20 +19,15 @@ from dossier.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Per-process budget: investigation_id -> count-already-consumed
 _BUDGET: dict[str, int] = {}
-_MAX_CRAWLS_PER_INVESTIGATION: int = 1  # D-13 budget
-_FIRECRAWL_TIMEOUT_MS: int = 30_000  # 30s per ARCHITECTURE.md §10
+_MAX_CRAWLS_PER_INVESTIGATION: int = 1
+_FIRECRAWL_TIMEOUT_MS: int = 30_000
 
 
 def read_firecrawl_env(strict: bool = True) -> str:
-    """Thin wrapper over Settings.firecrawl_api_key for backward compat."""
     key = get_settings().firecrawl_api_key.get_secret_value().strip()
     if strict and not key:
-        raise RuntimeError(
-            "FIRECRAWL_API_KEY not set. Copy .env.example to .env and paste key "
-            "from https://www.firecrawl.dev/app/api-keys."
-        )
+        raise RuntimeError("FIRECRAWL_API_KEY not set")
     return key
 
 
@@ -57,18 +38,10 @@ def _validate_url(url: str) -> None:
 
 
 def reset_budget_for_tests() -> None:
-    """Testing hook: clear the per-process budget tracker."""
     _BUDGET.clear()
 
 
 def _extract_markdown_and_title(result: Any) -> tuple[str, str | None]:
-    """Pull (markdown, title) from either a Document object or a dict-shaped response.
-
-    firecrawl-py v2 returns Document with .markdown and .metadata.title attrs.
-    Older SDK versions + test doubles may return a dict like {"data": {"markdown": ..., "metadata": {"title": ...}}}.
-    Normalize both shapes here.
-    """
-    # Dict path (legacy / test doubles)
     if isinstance(result, dict):
         data = result.get("data", result)
         if isinstance(data, dict):
@@ -78,12 +51,10 @@ def _extract_markdown_and_title(result: Any) -> tuple[str, str | None]:
             return md, title
         return "", None
 
-    # Attr path (v2 Document)
     md = getattr(result, "markdown", "") or ""
     meta = getattr(result, "metadata", None)
     title = None
     if meta is not None:
-        # metadata may itself be an object (DocumentMetadata) or a dict
         if isinstance(meta, dict):
             title = meta.get("title")
         else:
@@ -97,10 +68,10 @@ def crawl_seed_url(
     investigation_id: str,
     _budget_tracker: dict[str, int] | None = None,
 ) -> list[ToolResult]:
-    """Crawl one URL via Firecrawl. Enforces ≤1 call per investigation_id (D-13).
+    """Crawl one URL; enforces ≤1 call per investigation_id.
 
-    Returns [] if budget exhausted OR if the crawl errors (fail-open).
-    Raises ValueError if url scheme is not http(s).
+    Fail-open on budget exhaustion or crawl errors. Raises ValueError only
+    on non-http(s) URLs (a programmer error, not a runtime condition).
     """
     _validate_url(url)
     tracker = _budget_tracker if _budget_tracker is not None else _BUDGET
@@ -109,9 +80,7 @@ def crawl_seed_url(
     if used >= _MAX_CRAWLS_PER_INVESTIGATION:
         logger.warning(
             "Firecrawl budget exhausted for investigation %s (already %d crawl(s)); skipping %s",
-            investigation_id,
-            used,
-            url,
+            investigation_id, used, url,
         )
         return []
 
@@ -123,7 +92,6 @@ def crawl_seed_url(
 
     try:
         app = FirecrawlApp(api_key=read_firecrawl_env(strict=True))
-        # v2 API: scrape(url, formats=[...], timeout=ms) → Document
         result: Any = app.scrape(
             url,
             formats=["markdown"],
@@ -136,10 +104,9 @@ def crawl_seed_url(
     md, title = _extract_markdown_and_title(result)
 
     if not md.strip():
-        logger.info("Firecrawl returned empty markdown for %s (fail-open)", url)
+        logger.info("Firecrawl returned empty markdown for %s", url)
         return []
 
-    # Budget consumed.
     tracker[investigation_id] = used + 1
 
     return [

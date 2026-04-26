@@ -1,20 +1,7 @@
-"""GitHub REST wrapper — founder repos/activity per INVEST-02.
+"""GitHub REST wrapper for founder profile + recent repos.
 
-INVEST-02 is explicit: "agent synthesizes founder background from public sources
-(personal sites, GitHub, conference talks, podcast appearances) — no LinkedIn."
-GitHub covers the technical-founder surface area well; Exa covers non-technical.
-
-Phase 2 flow: pipeline.py calls this once per founder name resolved from Exa's
-initial company-name search. Parallel fan-out arrives in Phase 3 (D-04).
-
-Rejected alternatives:
-  - PyGithub / gh-sdk-python: STACK.md §2.4 locks httpx direct. PyGithub adds a
-    dependency + opinionated pagination. For 3 calls per investigation, direct
-    httpx is lighter.
-  - Unauthenticated calls only: 60 req/hr is too tight for the demo. Accept a
-    PAT in .env.
-  - Search-only (no repo walk): loses the "ex-Google ML engineer" fact-check
-    angle (INVEST-08 previews this in Phase 3).
+Uses httpx directly (not PyGithub) — three calls per investigation isn't worth
+a heavier SDK. Falls back to unauthenticated (60 req/hr) when no PAT is set.
 """
 from __future__ import annotations
 
@@ -39,19 +26,10 @@ GITHUB_TIMEOUT_S: float = 15.0
 
 
 def read_github_env(strict: bool = False) -> str:
-    """Thin wrapper over Settings.github_token for backward compat.
-
-    Returns empty string when the token isn't configured — _headers() then
-    omits Authorization and we fall back to unauthenticated GitHub at
-    60 req/hr (still useful for low-volume founder searches).
-    """
     token_secret = get_settings().github_token
     token = token_secret.get_secret_value().strip() if token_secret is not None else ""
     if strict and not token:
-        raise RuntimeError(
-            "GITHUB_TOKEN not set. Generate a PAT at https://github.com/settings/tokens "
-            "(scopes: public_repo, read:user) and paste into .env."
-        )
+        raise RuntimeError("GITHUB_TOKEN not set")
     return token
 
 
@@ -79,11 +57,10 @@ def _get_json(client: httpx.Client, path: str, params: dict[str, Any] | None = N
 
 
 def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> list[ToolResult]:
-    """Search GitHub for the founder and return up to ~6 ToolResults (1 profile + ~5 repos).
+    """Search GitHub for `founder_name`, return profile + 5 recent repos.
 
-    Fail-open: returns [] if no user matches OR if the search endpoint errors
-    after 3 retries. Individual profile/repo fetch failures after the search
-    succeeds are logged and skipped, not fatal.
+    Fail-open: returns [] on no match or search error. Once the search succeeds,
+    individual profile/repo failures are logged and skipped, not fatal.
     """
     tok = token if token is not None else read_github_env(strict=False)
     with httpx.Client(
@@ -101,9 +78,7 @@ def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> lis
 
         items = search_json.get("items", []) if isinstance(search_json, dict) else []
         if not items:
-            logger.info(
-                "GitHub user search returned 0 results for %r (fail-open)", founder_name
-            )
+            logger.info("GitHub user search returned 0 results for %r", founder_name)
             return []
 
         top = items[0]
@@ -113,7 +88,6 @@ def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> lis
 
         results: list[ToolResult] = []
 
-        # 1. Profile page
         try:
             profile = _get_json(client, f"/users/{login}")
             bio = (profile.get("bio") or "").strip()
@@ -137,7 +111,6 @@ def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> lis
         except httpx.HTTPError as exc:
             logger.warning("GitHub profile fetch failed for %r: %s", login, exc)
 
-        # 2. Top 5 recently-updated repos
         try:
             repos = _get_json(
                 client, f"/users/{login}/repos", params={"sort": "updated", "per_page": 5}

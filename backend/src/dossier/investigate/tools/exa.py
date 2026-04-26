@@ -1,27 +1,14 @@
-"""Exa search wrapper — primary web search for Phase 2 (CONTEXT.md D-11).
+"""Exa web search wrapper.
 
-Exa was chosen over Tavily per CLAUDE.md locked decision: Tavily hides source
-spans, Exa returns excerpts that downstream grounding needs. See STACK.md §2.4.
+Chosen over Tavily because Exa returns excerpts that downstream citation
+grounding can substring-match against. Tavily collapses to summaries.
 
-Fail-open policy (CONTEXT.md D-09 §Claude's Discretion):
-  - If Exa returns zero results, return []. Pipeline emits a thin brief with a
-    logged warning rather than marking the investigation failed. Partial > none.
-  - If the Exa API itself errors (network, 5xx), retry 3x via tenacity then raise;
-    pipeline catches and marks investigation failed with error set.
+Fail-open: empty results return []. Network/5xx errors retry 3x then raise
+ExaSearchError; the caller decides whether to fail the investigation.
 
-Rejected alternatives:
-  - Tavily: hides source spans (CLAUDE.md lock).
-  - Async client (AsyncExa): Phase 2 pipeline is sequential per D-04; adds asyncio
-    complexity for no throughput benefit with 3 sequential tool calls.
-  - No retry: Exa free tier has daily caps AND transient 502s — unretried calls
-    fail more often than retried ones.
-
-Installed-API note (2026-04-22):
-  exa-py on this env exposes `search_and_contents(query, **kwargs)` but marks it
-  DEPRECATED in favor of `search(query, contents={"text": True})`. We use
-  search_and_contents for now because the test monkeypatches it — migrating to
-  `search(contents=...)` is a one-liner swap when exa-py removes the deprecated
-  method.
+Note: exa-py exposes both `search_and_contents` and a newer `search(contents=...)`.
+We use the older entry point because the unit tests monkeypatch it; swap is
+a one-liner if exa-py drops it.
 """
 from __future__ import annotations
 
@@ -42,24 +29,17 @@ logger = logging.getLogger(__name__)
 
 
 def read_exa_env(strict: bool = True) -> str:
-    """Thin wrapper over Settings.exa_api_key for backward compat. Settings
-    already validates presence at process start, so strict-mode raise is now
-    a defensive guard against the (rare) case of an empty SecretStr."""
     key = get_settings().exa_api_key.get_secret_value().strip()
     if strict and not key:
-        raise RuntimeError(
-            "EXA_API_KEY not set. Copy .env.example to .env and paste key from "
-            "https://dashboard.exa.ai/api-keys."
-        )
+        raise RuntimeError("EXA_API_KEY not set")
     return key
 
 
 class ExaSearchError(RuntimeError):
-    """Raised on non-recoverable Exa failures after retries are exhausted."""
+    """Raised after retries exhaust on a non-recoverable Exa failure."""
 
 
 def _extract_field(result: Any, name: str, default: Any = None) -> Any:
-    """Pull a field from an Exa result — works for both dict-shaped and object-shaped results."""
     if isinstance(result, dict):
         return result.get(name, default)
     return getattr(result, name, default)
@@ -72,17 +52,10 @@ def _extract_field(result: Any, name: str, default: Any = None) -> Any:
     reraise=True,
 )
 def _exa_call(query: str, num_results: int) -> list[dict[str, Any]]:
-    """Call Exa search_and_contents; raise ExaSearchError on transient failure.
-
-    This is the retry boundary — callers see either a list or a raised
-    ExaSearchError after 3 attempts.
-    """
-    from exa_py import Exa  # noqa: PLC0415  (deferred import — allows tests to patch)
+    from exa_py import Exa  # noqa: PLC0415  (deferred so tests can patch)
 
     client = Exa(api_key=read_exa_env(strict=True))
     try:
-        # exa-py: use search_and_contents to get url + text in one call.
-        # Deprecation note in module docstring.
         response = client.search_and_contents(
             query,
             num_results=num_results,
@@ -92,8 +65,6 @@ def _exa_call(query: str, num_results: int) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001 — exa-py raises various types
         raise ExaSearchError(f"Exa search failed: {exc}") from exc
 
-    # exa-py returns an object with .results list; each item has .url/.text/.title/.score.
-    # Defensive: some versions wrap differently.
     results = getattr(response, "results", None)
     if results is None:
         results = response if isinstance(response, list) else []
@@ -110,12 +81,7 @@ def _exa_call(query: str, num_results: int) -> list[dict[str, Any]]:
 
 
 def search(query: str, *, num_results: int = 8) -> list[ToolResult]:
-    """Run an Exa web search; return up to `num_results` ToolResult objects.
-
-    Fail-open: returns [] on empty results. Raises ExaSearchError after retries
-    if the Exa API is unreachable/errored; pipeline.py catches and marks the
-    investigation failed.
-    """
+    """Run an Exa web search; return up to `num_results` ToolResult objects."""
     try:
         raw_results = _exa_call(query, num_results)
     except ExaSearchError:
@@ -123,7 +89,7 @@ def search(query: str, *, num_results: int = 8) -> list[ToolResult]:
         raise
 
     if not raw_results:
-        logger.info("Exa search returned 0 results for query: %r (fail-open)", query)
+        logger.info("Exa search returned 0 results for query: %r", query)
         return []
 
     return [
@@ -135,7 +101,7 @@ def search(query: str, *, num_results: int = 8) -> list[ToolResult]:
             raw_metadata={"score": r["score"]} if r.get("score") is not None else {},
         )
         for r in raw_results
-        if r.get("url")  # skip rows with no URL — cannot cite without it
+        if r.get("url")  # can't cite without a URL
     ]
 
 
