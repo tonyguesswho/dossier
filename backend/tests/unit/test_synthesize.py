@@ -13,7 +13,7 @@ from dossier.investigate.synthesize import (
     _format_retrieved,
     synthesize_brief,
 )
-from dossier.models import Brief, BriefClaim
+from dossier.investigate.brief_schema import Brief, BriefClaim
 
 
 def _chunk(text: str = "Acme was founded in 2024.") -> RetrievedChunk:

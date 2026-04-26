@@ -1,17 +1,7 @@
 """Brief markdown rendering."""
 from __future__ import annotations
 
-from dossier.models import Brief, BriefClaim
-
-
-_SECTION_HEADINGS: list[tuple[str, str]] = [
-    ("Founders", "founders"),
-    ("Company", "company"),
-    ("Market", "market"),
-    ("Product", "product"),
-    ("Risk Flags", "risk_flags"),
-    ("Suggested Questions", "suggested_questions"),
-]
+from dossier.investigate.brief_schema import Brief, BriefClaim, section_headings
 
 
 def brief_to_markdown(brief: Brief, url_by_chunk: dict[str, str]) -> str:
@@ -23,7 +13,7 @@ def brief_to_markdown(brief: Brief, url_by_chunk: dict[str, str]) -> str:
     `(source)` without a link rather than dropping the citation.
     """
     out: list[str] = []
-    for heading, field in _SECTION_HEADINGS:
+    for heading, field in section_headings():
         out.append(f"## {heading}\n")
         claims: list[BriefClaim] = getattr(brief, field)
         if not claims:

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 
+from dossier.investigate.brief_schema import BRIEF_DB_SECTIONS
+
 from ..state import DossierState
 
 logger = logging.getLogger(__name__)
-ALL_SECTIONS = ["founders", "company", "market", "product", "risk", "suggested_questions"]
 
 
 async def run(state: DossierState) -> dict:
@@ -20,7 +21,7 @@ async def run(state: DossierState) -> dict:
         return {"should_regather": False, "targeted_sections": []}
 
     claimed_sections = {c.section for c in state.get("draft_claims", [])}
-    empty_sections = [s for s in ALL_SECTIONS if s not in claimed_sections]
+    empty_sections = [s for s in BRIEF_DB_SECTIONS if s not in claimed_sections]
 
     if empty_sections:
         logger.info("verifier: empty sections=%s — re-gathering", empty_sections)

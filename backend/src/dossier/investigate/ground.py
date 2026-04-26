@@ -19,22 +19,10 @@ from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
 from dossier.core.text_normalize import normalize
+from dossier.investigate.brief_schema import FIELD_TO_DB, Brief, BriefClaim
 from dossier.investigate.retrieve import RetrievedChunk
-from dossier.models import Brief, BriefClaim
 
 logger = logging.getLogger(__name__)
-
-
-# Synthesizer-facing field names → DB section values.
-# Note `risk_flags` (plural field) → `risk` (singular DB value).
-SECTION_FIELD_TO_DB: dict[str, str] = {
-    "founders": "founders",
-    "company": "company",
-    "market": "market",
-    "product": "product",
-    "risk_flags": "risk",
-    "suggested_questions": "suggested_questions",
-}
 
 
 class GroundStats(BaseModel):
@@ -88,7 +76,7 @@ def ground_claims(
     brief_dict = brief.model_dump()
 
     with eng.begin() as conn:
-        for field_name, db_section in SECTION_FIELD_TO_DB.items():
+        for field_name, db_section in FIELD_TO_DB.items():
             section_claims: list[dict] = brief_dict.get(field_name, []) or []
             for ordinal, claim_dict in enumerate(section_claims):
                 claim = BriefClaim(**claim_dict)
@@ -155,6 +143,5 @@ def ground_claims(
 
 __all__ = [
     "GroundStats",
-    "SECTION_FIELD_TO_DB",
     "ground_claims",
 ]

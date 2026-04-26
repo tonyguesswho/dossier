@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import logging
 
+from dossier.investigate.brief_schema import BRIEF_DB_SECTIONS
+
 from ..state import DossierState
 
 logger = logging.getLogger(__name__)
-ALL_SECTIONS = ["founders", "company", "market", "product", "risk", "suggested_questions"]
 
 
 async def run(state: DossierState) -> dict:
@@ -15,7 +16,7 @@ async def run(state: DossierState) -> dict:
         state["investigation_id"], state["company"],
     )
     return {
-        "targeted_sections": ALL_SECTIONS,
+        "targeted_sections": list(BRIEF_DB_SECTIONS),
         "reflection_count": 0,
         "should_regather": False,
     }

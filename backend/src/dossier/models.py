@@ -1,22 +1,16 @@
-"""Pydantic contracts shared across synth, ground, eval, and chat.
+"""DB-row Pydantic contracts for the eval pipeline (Claim, GoldClaim).
 
-Public interface — a change here propagates to every downstream consumer.
+The Brief domain — Brief, BriefClaim, BriefSection — lives in
+`investigate.brief_schema`. Import from there.
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
-BriefSection = Literal[
-    "founders",
-    "company",
-    "market",
-    "product",
-    "risk",
-    "suggested_questions",
-]
+from dossier.investigate.brief_schema import BriefSection
 
 
 class Claim(BaseModel):
@@ -57,36 +51,4 @@ class GoldClaim(BaseModel):
     source_text: str
 
 
-class BriefClaim(BaseModel):
-    """Synthesizer output (pre-grounding). ground.py resolves it to a full
-    Claim row with grounded_span_* via normalized-substring match. Ungrounded
-    claims still get persisted with grounded_source_chunk_id=NULL so the
-    hallucination metric can count them.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    claim_text: str
-    quoted_span: str
-    source_chunk_id: str
-
-
-class Brief(BaseModel):
-    """6-section synthesizer output, validated by openai's structured outputs.
-
-    Field names are synthesizer-facing slot names ('risk_flags'); BriefSection
-    literals are DB-facing values ('risk'). SECTION_FIELD_TO_DB in ground.py
-    is the canonical translation.
-    """
-
-    model_config = ConfigDict(from_attributes=True)
-
-    founders: list[BriefClaim]
-    company: list[BriefClaim]
-    market: list[BriefClaim]
-    product: list[BriefClaim]
-    risk_flags: list[BriefClaim]
-    suggested_questions: list[BriefClaim]
-
-
-__all__ = ["BriefSection", "BriefClaim", "Brief", "Claim", "GoldClaim"]
+__all__ = ["Claim", "GoldClaim"]

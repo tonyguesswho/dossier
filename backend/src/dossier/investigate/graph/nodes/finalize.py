@@ -23,9 +23,13 @@ logger = logging.getLogger(__name__)
 
 async def run(state: DossierState) -> dict:
     from dossier.core.db import get_async_session
-    from dossier.investigate.ground import SECTION_FIELD_TO_DB, ground_claims
+    from dossier.investigate.brief_schema import (
+        DB_TO_FIELD,
+        BriefClaim,
+        build_brief_from_grouped,
+    )
+    from dossier.investigate.ground import ground_claims
     from dossier.investigate.retrieve import retrieve_top_k
-    from dossier.models import Brief, BriefClaim
 
     investigation_id_str = state["investigation_id"]
     investigation_uuid = UUID(investigation_id_str)
@@ -37,11 +41,9 @@ async def run(state: DossierState) -> dict:
         len(draft_claims), investigation_id_str,
     )
 
-    # DB section ('risk') → Brief field ('risk_flags').
-    db_to_field = {db: field for field, db in SECTION_FIELD_TO_DB.items()}
     grouped: dict[str, list[BriefClaim]] = defaultdict(list)
     for dc in draft_claims:
-        field_name = db_to_field.get(dc.section)
+        field_name = DB_TO_FIELD.get(dc.section)
         if field_name is None:
             logger.warning("finalize: unknown section=%r — skipping", dc.section)
             continue
@@ -53,14 +55,7 @@ async def run(state: DossierState) -> dict:
             )
         )
 
-    brief = Brief(
-        founders=grouped.get("founders", []),
-        company=grouped.get("company", []),
-        market=grouped.get("market", []),
-        product=grouped.get("product", []),
-        risk_flags=grouped.get("risk_flags", []),
-        suggested_questions=grouped.get("suggested_questions", []),
-    )
+    brief = build_brief_from_grouped(grouped)
 
     retrieved = await asyncio.to_thread(
         retrieve_top_k, investigation_uuid, company, k=50

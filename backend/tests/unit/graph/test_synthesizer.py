@@ -4,7 +4,7 @@ Scope:
   - synthesizer.run() is an async coroutine.
   - Brief produced by synthesize_brief is flattened into DraftClaimRef list
     with DB section names (singular 'risk' not plural 'risk_flags').
-  - All 6 Brief field names map to DB section values via SECTION_FIELD_TO_DB.
+  - All 6 Brief field names map to DB section values via brief_schema.FIELD_TO_DB.
   - synthesizer calls retrieve_top_k + synthesize_brief via asyncio.to_thread
     (Phase 2 sync modules bridged unchanged).
   - The async DB session is opened AFTER the to_thread bridges return
@@ -19,7 +19,7 @@ from uuid import uuid4
 import pytest
 
 from dossier.investigate.graph.nodes import synthesizer
-from dossier.models import Brief, BriefClaim
+from dossier.investigate.brief_schema import Brief, BriefClaim
 
 
 def _make_state(investigation_id: str, **overrides):

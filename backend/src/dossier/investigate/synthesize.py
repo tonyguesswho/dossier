@@ -20,7 +20,7 @@ from typing import Any
 from dossier.core.exceptions import PipelineError
 from dossier.core.llm import STRONG_MODEL_ID, strong_model
 from dossier.investigate.retrieve import RetrievedChunk
-from dossier.models import Brief
+from dossier.investigate.brief_schema import Brief
 
 logger = logging.getLogger(__name__)
 

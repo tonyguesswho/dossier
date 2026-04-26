@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 
 from dossier.investigate.ground import ground_claims
 from dossier.investigate.retrieve import RetrievedChunk
-from dossier.models import Brief, BriefClaim
+from dossier.investigate.brief_schema import Brief, BriefClaim
 
 
 class _FakeConn:

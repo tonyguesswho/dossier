@@ -20,7 +20,7 @@ import pytest
 
 from dossier.investigate.graph.nodes import finalize
 from dossier.investigate.graph.state import DraftClaimRef, GroundedClaimRef
-from dossier.models import Brief
+from dossier.investigate.brief_schema import Brief
 
 
 def _make_state(investigation_id: str, draft_claims=None, **overrides):

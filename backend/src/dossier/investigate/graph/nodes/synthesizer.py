@@ -5,7 +5,7 @@ Reuses the synchronous Phase-2 retrieve_top_k + synthesize_brief unchanged
 delimiter sandbox, so this node inherits injection-defense without extra wiring.
 
 Brief uses field names ('risk_flags'); state.section uses DB Literal values
-('risk'). SECTION_FIELD_TO_DB does the translation.
+('risk'). FIELD_TO_DB from brief_schema does the translation.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 async def run(state: DossierState) -> dict:
     """Returns {"draft_claims": [...]} — verifier inspects per-section coverage."""
     from dossier.core.db import get_async_session
-    from dossier.investigate.ground import SECTION_FIELD_TO_DB
+    from dossier.investigate.brief_schema import FIELD_TO_DB
     from dossier.investigate.retrieve import retrieve_top_k
     from dossier.investigate.synthesize import synthesize_brief
 
@@ -66,7 +66,7 @@ async def run(state: DossierState) -> dict:
             )
 
     draft_claims: list[DraftClaimRef] = []
-    for field_name, db_section in SECTION_FIELD_TO_DB.items():
+    for field_name, db_section in FIELD_TO_DB.items():
         section_claims = getattr(brief, field_name, []) or []
         for claim in section_claims:
             draft_claims.append(
