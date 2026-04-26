@@ -1,31 +1,15 @@
-"""Pitch-deck ingestion: PDF → markdown → pipeline (Phase 5-lite).
+"""Pitch-deck ingestion — PDF → markdown → graph.
 
-MarkItDown (microsoft/markitdown) handles PDF parsing via pdfminer.six. For
-well-formatted PDFs (reports, whitepapers) output is clean; for pitch decks
-with stylized text boxes, layout can be jumbled. Acceptable tradeoff for the
-demo-lite path — vision extraction is roadmapped.
+MarkItDown handles PDF parsing via pdfminer.six. Output for stylized text-box
+decks can be jumbled, but for whitepapers and reports it's clean.
 
-Design notes:
-  - One synthetic ToolResult wraps the full markdown → fed to ingest_tool_results
-    which chunks at 800 tokens / 120 overlap (same as web sources). Pitch-deck
-    bullets often chunk well because MarkItDown preserves page-break paragraphs.
-  - source_kind="deck_page" so the sources.source_kind CHECK constraint and
-    frontend SourceListItem type (which already enumerates "deck_page") both
-    accept the row. ToolResult.source_kind Literal was widened in this plan.
-  - We pre-populate source_chunks BEFORE calling run_investigation so the
-    pipeline's _gather stage can still run against the filename stub (returns
-    empty), then _retrieve sees the deck chunks and synthesis proceeds normally.
-  - Dispatch is always local (FastAPI BackgroundTasks). Lambda self-invoke for
-    decks would need S3 to ferry the markdown — out of scope for demo-lite.
+Pre-ingest the uploaded markdown as one synthetic ToolResult before invoking
+the graph. The graph reads input_type='deck' from the investigations row and
+short-circuits stage1/stage2 fan-out, so no web tools fire and the deck stays
+the only corpus.
 
-Rejected alternatives:
-  - Skip run_investigation and call the downstream stages (retrieve, synth,
-    ground, render) inline: duplicates pipeline.py's Langfuse wiring + status
-    transitions + brief rendering. Reuse-is-cheaper.
-  - Use MarkItDown on raw bytes without BytesIO wrapper: convert_stream() wants
-    a BinaryIO; a bytes object triggers AttributeError on .read().
-  - Vision model (GPT-4o) on rasterized slides: Phase 5-full path; adds
-    pdf2image + poppler + per-slide OpenAI calls. Out of scope for demo-lite.
+Dispatch is local-only — Lambda self-invoke for decks would need S3 to ferry
+the markdown (256 KB Event payload limit can't carry it).
 """
 from __future__ import annotations
 
@@ -47,13 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def pdf_to_markdown(pdf_bytes: bytes, filename: str) -> str:
-    """Convert PDF bytes to markdown via MarkItDown. Returns extracted text.
-
-    `filename` is cosmetic — MarkItDown infers the parser from ``file_extension``
-    and/or magic bytes. We pass ``.pdf`` explicitly to avoid the sniffing step.
-    Deferred import keeps module-load cheap for tests that never hit this path.
-    """
-    from markitdown import MarkItDown  # noqa: PLC0415 — deferred import
+    """Convert PDF bytes to markdown via MarkItDown."""
+    from markitdown import MarkItDown  # noqa: PLC0415
 
     md = MarkItDown()
     stream = io.BytesIO(pdf_bytes)
@@ -62,10 +41,9 @@ def pdf_to_markdown(pdf_bytes: bytes, filename: str) -> str:
 
 
 class _ExtractedCompany(BaseModel):
-    """Structured output for deck → company-name extraction."""
     model_config = ConfigDict(extra="forbid")
     company_name: str
-    confidence: float  # 0.0–1.0; below ~0.5 means "not confident"
+    confidence: float  # 0.0–1.0
 
 
 _COMPANY_EXTRACT_SYSTEM = """You identify the subject company of a pitch deck.
@@ -85,16 +63,11 @@ Rules:
 
 
 def extract_company_from_markdown(markdown: str, *, client=None) -> str | None:
-    """Return the subject company name, or None if extraction fails / is unsure.
+    """Subject-company extraction via Haiku. Returns None on uncertainty.
 
-    Uses Haiku for cost (cheap_model_id) via OpenRouter + structured output.
-    Truncates to the first 3000 chars — the cover and executive-summary slides
-    are where the brand name lives; beyond that it's mostly body content that
-    just adds cost without signal.
-
-    Fail-open: any LLM error (network, parse, empty) returns None so the
-    caller falls back to filename-derived display name. Deck upload path is
-    already wrapped in a broad try/except; this function must not raise.
+    Truncates to the first 3000 chars — the cover and exec-summary slides
+    carry the brand name; further pages are body content that adds cost
+    without signal. Must never raise (caller falls back to filename).
     """
     if not markdown or not markdown.strip():
         return None
@@ -112,7 +85,7 @@ def extract_company_from_markdown(markdown: str, *, client=None) -> str | None:
         )
         parsed = completion.choices[0].message.parsed
     except Exception:
-        logger.warning("deck: company-name extraction failed", exc_info=True)
+        logger.warning("deck: company extraction failed", exc_info=True)
         return None
 
     if parsed is None or parsed.confidence < 0.5 or not parsed.company_name.strip():
@@ -130,25 +103,11 @@ def run_deck_investigation(
     *,
     engine: Engine | None = None,
 ) -> None:
-    """Run the investigation graph with a pitch deck as the sole source.
+    """Pre-ingest the deck as a synthetic ToolResult, then run the graph.
 
-    Flow:
-      1. Pre-ingest the uploaded markdown as a synthetic ToolResult →
-         source_chunks populated BEFORE the graph runs.
-      2. Invoke `run_graph` (the canonical path). The graph reads
-         input_type='deck' from the investigations row and routes via
-         gather_fanout's deck short-circuit — stage1_router + stage2_router
-         return empty Send lists, so no web tools fire and the corpus
-         stays exactly as the deck provided.
-      3. Retrieve → synthesize → ground → finalize (brief_markdown +
-         scorecard) happens inside the graph.
-
-    On pre-ingest failure the investigation is marked failed and we return
-    early; run_graph is never called with a half-populated chunk table.
+    On pre-ingest failure we mark the investigation failed and return — the
+    graph is never run against a half-populated chunk table.
     """
-    # Deferred import to avoid importing the graph (and its LangGraph/
-    # psycopg_pool deps) on every deck upload path — only the background
-    # task worker needs them.
     import asyncio  # noqa: PLC0415
     from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
 
@@ -183,4 +142,4 @@ def run_deck_investigation(
     asyncio.run(run_graph(str(investigation_id)))
 
 
-__all__ = ["pdf_to_markdown", "run_deck_investigation"]
+__all__ = ["extract_company_from_markdown", "pdf_to_markdown", "run_deck_investigation"]

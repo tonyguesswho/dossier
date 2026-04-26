@@ -85,8 +85,8 @@ def test_retrieved_content_wrapped_in_delimiter_tags() -> None:
     assert "</retrieved_content>" in out
 
 
-def test_system_prompt_includes_guard01_instruction() -> None:
-    assert "GUARD-01" in SYSTEM_PROMPT
+def test_system_prompt_includes_security_instruction() -> None:
+    assert "SECURITY INSTRUCTION" in SYSTEM_PROMPT
     assert "UNTRUSTED DATA" in SYSTEM_PROMPT
     assert "retrieved_content" in SYSTEM_PROMPT
 

@@ -1,36 +1,8 @@
-"""pgvector top-k retrieval for Phase 2 synthesis.
+"""pgvector top-k retrieval scoped to one investigation.
 
-One function: `retrieve_top_k(investigation_id, query, k=6)`.
-Section-biasing via query reformulation (e.g., "founders of Acme AI" vs.
-"market size for Acme AI"), not metadata filter. Re-rank deferred to Phase 3.
-
-Query operator: `<=>` is pgvector's cosine-distance operator — it hits the
-HNSW index created by migration 0001 with `vector_cosine_ops`. If we used
-`<->` (L2 distance) or `<#>` (inner product), the query would NOT hit the
-index and would fall back to sequential scan, making Phase 2 retrieval
-slow enough to blow the 210s pipeline budget (CONTEXT.md §specifics).
-
-Migration 0001 lines 161-167 created:
-    CREATE INDEX source_chunks_embedding_idx ON source_chunks
-        USING hnsw (embedding vector_cosine_ops)
-        WITH (m=16, ef_construction=64)
-
-Rejected alternatives:
-  - Re-rank with cross-encoder / BM25 hybrid: Phase 2 keeps retrieval simple
-    per CONTEXT.md D-04 (linear pipeline). Phase 3 LangGraph adds re-rank.
-  - Metadata filter on source_kind: callers who want "only github sources"
-    can filter in Python; keeping the SQL one-query simplifies Phase 4 eval
-    replay (deterministic SQL = deterministic retrieval).
-  - Top-k = 4 (smaller): CONTEXT.md §Claude's Discretion suggests 4-6;
-    pick 6 for recall headroom per PATTERNS.md §retrieve.py.
-  - `<->` L2 distance: would NOT hit the vector_cosine_ops HNSW index,
-    forcing a sequential scan. Cosine distance (`<=>`) is the locked
-    operator for this schema.
-
-Exported contract (imported by Plan 02-07 retrieval wrapper + Plan 02-08 synth):
-  - RetrievedChunk Pydantic model
-  - retrieve_top_k function
-  - DEFAULT_TOP_K constant
+Operator: `<=>` (cosine distance) is the only one that hits the HNSW index
+created with `vector_cosine_ops`. `<->` (L2) or `<#>` (inner product) fall
+back to sequential scan, which blows the latency budget on real corpora.
 """
 from __future__ import annotations
 
@@ -46,16 +18,11 @@ from dossier.core.llm import embedding_client, embedding_model
 
 logger = logging.getLogger(__name__)
 
-# top-k = 6 per CONTEXT.md §Claude's Discretion (4-6 range; pick 6 for recall headroom).
 DEFAULT_TOP_K: int = 6
 
 
 class RetrievedChunk(BaseModel):
-    """One chunk returned by retrieve_top_k, ranked by pgvector cosine distance.
-
-    distance is the raw pgvector `<=>` output: smaller = more similar (0 = identical).
-    Downstream synth code uses distance only for ranking, not as a calibrated score.
-    """
+    """distance is raw pgvector `<=>` output: smaller = more similar (0 = identical)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -69,21 +36,12 @@ class RetrievedChunk(BaseModel):
 
 
 def _vector_literal(vec: list[float]) -> str:
-    """Format a Python list[float] as a pgvector `[x,y,z]` string literal.
-
-    Duplicated from ingest._vector_literal (intentionally — different modules
-    serialize vectors for different directions: ingest writes, retrieve queries).
-    If this formatter ever needs semantic changes, both locations must update.
-    """
     return "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
 
 
 def _embed_query(query: str) -> list[float]:
-    """Embed a single query string via text-embedding-3-small.
-
-    Uses embedding_client() (direct OpenAI), NOT strong_model() (OpenRouter) —
-    OpenRouter doesn't proxy /v1/embeddings. Exposed at module scope so tests
-    can monkeypatch with a fixed vector — see test_retrieve_pgvector.py.
+    """Direct OpenAI — OpenRouter doesn't proxy /v1/embeddings.
+    Module-scoped so tests can monkeypatch with a fixed vector.
     """
     client = embedding_client()
     resp = client.embeddings.create(model=embedding_model(), input=[query])
@@ -97,15 +55,10 @@ def retrieve_top_k(
     k: int = DEFAULT_TOP_K,
     engine: Engine | None = None,
 ) -> list[RetrievedChunk]:
-    """Return the top-k source_chunks scoped to investigation_id, closest first.
+    """Top-k chunks scoped to investigation_id, closest first.
 
-    Empty list if the investigation has no chunks — caller decides whether that
-    is an error or a thin-brief scenario (CONTEXT.md §Claude's Discretion
-    fail-open: partial brief > failed investigation).
-
-    Security: WHERE s.investigation_id = :inv is MANDATORY — defends against
-    T-02-06-03 (cross-investigation chunk leak). Covered by
-    test_retrieve_top_k_scoped_to_investigation.
+    The WHERE s.investigation_id clause is mandatory — without it, retrieval
+    leaks across investigations (covered by test_retrieve_top_k_scoped_to_investigation).
     """
     if not query or not query.strip():
         return []

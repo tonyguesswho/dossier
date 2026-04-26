@@ -1,35 +1,19 @@
-"""Chunk + embed + insert pipeline stage.
+"""Chunk + embed + insert.
 
-Takes list[ToolResult] (from dossier.investigate.tools.*) and writes:
-  - One `sources` row per ToolResult (deduped by content_hash per investigation).
-  - Many `source_chunks` rows per source — chunked 800 tokens / 120 overlap.
+Takes ToolResults and writes:
+  - one `sources` row per result (deduped by content_hash within an investigation)
+  - many `source_chunks` rows per source (800 tokens / 120 overlap)
 
-Pitfall defenses:
-  - Pitfall 2.1 (chunking severs claims): use RecursiveCharacterTextSplitter with
-    tiktoken encoder so 800/120 are TOKEN counts (not character counts). A raw
-    character splitter at 800 chars would break mid-sentence and sever claims
-    from the evidence spans they cite.
-  - Pitfall 2.2 (embedding drift): every source_chunks.metadata JSONB must include
-    `embedding_model`. If we later switch models, a script can backfill old rows
-    without guessing which embedding produced what.
-  - Pitfall 3.5 (in-memory state): all rows go through Postgres immediately;
-    nothing stays in Python dicts past function return.
+Two non-obvious choices worth knowing:
 
-Rejected alternatives:
-  - LangChain CharacterTextSplitter (char-based 800): breaks mid-sentence on long
-    English paragraphs (Pitfall 2.1 scenario).
-  - tiktoken.encode(...) hand-rolled chunking: reimplements a solved problem;
-    RecursiveCharacterTextSplitter from langchain-text-splitters already accounts
-    for paragraph/sentence boundaries with token-count limits.
-  - Store raw text in S3 (Phase 3+): out of scope for Phase 2 (CONTEXT.md D-01
-    local backend). Use a synthetic `local://investigations/...` placeholder in
-    raw_text_s3_key; Phase 5 deck upload will wire real S3.
-  - Skip content_hash (accept duplicates): Exa + Firecrawl on the same domain
-    return overlapping URLs often. content_hash dedupe is cheap and correct.
-  - `from_tiktoken_encoder()` with default encoding (gpt2): triggers a network
-    download of gpt-2 vocab.bpe on first call — fails in offline/sandboxed envs.
-    We pass `encoding_name="cl100k_base"` explicitly; it's cl100k that
-    text-embedding-3-small actually uses AND it ships bundled with tiktoken.
+1. Splitter is RecursiveCharacterTextSplitter.from_tiktoken_encoder with
+   `cl100k_base`. cl100k is what text-embedding-3-small uses, AND it ships
+   bundled with tiktoken. The default `gpt2` encoder triggers a network
+   download on first call and breaks in offline/sandboxed envs.
+
+2. source_chunks.metadata stamps `embedding_model`. If we ever switch
+   embedding models, a backfill script needs to know which embedding
+   produced which row.
 """
 from __future__ import annotations
 
@@ -49,24 +33,17 @@ from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
 
-# STACK.md §2.2 / Pitfall 2.1 defense — 800/120 in TOKENS (not chars).
+# 800/120 in TOKENS, not chars. Char-based 800 splits mid-sentence on long paragraphs.
 CHUNK_SIZE_TOKENS: int = 800
 CHUNK_OVERLAP_TOKENS: int = 120
 
-# OpenAI embeddings endpoint accepts up to ~100 inputs per call efficiently
-# (ARCHITECTURE.md §10 "OpenAI embeddings" row).
 EMBED_BATCH_SIZE: int = 100
 
-# cl100k_base is the encoding used by text-embedding-3-small (and gpt-4, gpt-3.5-turbo).
-# Hardcoded rather than defaulted because `from_tiktoken_encoder()`'s default `gpt2`
-# requires a network download on first use; cl100k_base ships bundled with tiktoken.
 _TIKTOKEN_ENCODING: str = "cl100k_base"
 
 
 @dataclass(frozen=True)
 class ChunkSpan:
-    """One chunk with its character offsets in the source text."""
-
     chunk_index: int
     text: str
     char_start: int
@@ -83,8 +60,6 @@ class IngestStats(BaseModel):
 
 
 def _build_splitter():
-    """RecursiveCharacterTextSplitter in tiktoken token-count mode."""
-    # Deferred import: keep module import cheap for tests that don't touch chunking.
     from langchain_text_splitters import RecursiveCharacterTextSplitter  # noqa: PLC0415
 
     return RecursiveCharacterTextSplitter.from_tiktoken_encoder(
@@ -95,12 +70,11 @@ def _build_splitter():
 
 
 def _chunk_text(full_text: str) -> list[ChunkSpan]:
-    """Split text into token-bounded chunks with char_start/char_end offsets.
+    """Token-bounded chunks with char_start/char_end offsets in the source text.
 
-    The splitter returns substrings; we find each substring's position in the
-    original text for the char offsets (INVEST-04 stable span requirement).
-    Overlapping chunks share characters — that's fine; each chunk's offsets
-    are independently valid for quoting.
+    The splitter returns substrings; we locate each in the original to record
+    char offsets. Overlapping chunks share characters — fine, each chunk's
+    offsets independently support quoting.
     """
     if not full_text or not full_text.strip():
         return []
@@ -110,14 +84,12 @@ def _chunk_text(full_text: str) -> list[ChunkSpan]:
     spans: list[ChunkSpan] = []
     cursor = 0
     for i, part in enumerate(parts):
-        # Find this chunk starting from `cursor` — prevents earlier-identical-phrase
-        # false matches. If not found forward, fall back to a full-text find.
+        # Search forward from cursor first to avoid earlier identical-phrase matches.
         found = full_text.find(part, cursor)
         if found == -1:
             found = full_text.find(part)
         if found == -1:
-            # Shouldn't happen with RecursiveCharacterTextSplitter, but be safe.
-            logger.warning("Chunk %d text not located in source; char_start=0", i)
+            logger.warning("Chunk %d not located in source; using char_start=0", i)
             found = 0
         spans.append(
             ChunkSpan(
@@ -127,16 +99,12 @@ def _chunk_text(full_text: str) -> list[ChunkSpan]:
                 char_end=found + len(part),
             )
         )
-        cursor = found + 1  # advance past current start for next search
+        cursor = found + 1
     return spans
 
 
 def _embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
-    """Batch-embed chunk texts via OpenAI text-embedding-3-small.
-
-    Uses embedding_client() (direct OpenAI), NOT strong_model() (OpenRouter).
-    OpenRouter's /v1 surface is chat completions only; embeddings go direct.
-    """
+    """Embeddings go direct to api.openai.com — OpenRouter doesn't proxy /v1/embeddings."""
     if not chunk_texts:
         return []
     client = embedding_client()
@@ -150,16 +118,11 @@ def _embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
 
 
 def _sha256(text_value: str) -> str:
-    """Return the hex SHA-256 of a string. Used for sources.content_hash dedup."""
     return hashlib.sha256(text_value.encode("utf-8")).hexdigest()
 
 
 def _vector_literal(vec: list[float]) -> str:
-    """Format a Python list[float] as a pgvector `[x,y,z]` string literal.
-
-    7-digit precision matches text-embedding-3-small's float32 range and keeps
-    INSERT payloads compact without meaningful precision loss for cosine similarity.
-    """
+    """Format a list[float] as pgvector's `[x,y,z]` literal."""
     return "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
 
 
@@ -169,16 +132,10 @@ def ingest_tool_results(
     *,
     engine: Engine | None = None,
 ) -> IngestStats:
-    """Write one sources row + N source_chunks rows per ToolResult.
+    """Insert one sources row + N source_chunks per ToolResult.
 
-    Contract:
-      - Empty-text results are skipped (logged, counted in chunks_skipped_empty).
-      - Duplicate (investigation_id, content_hash) rows are skipped via UNIQUE
-        constraint ON CONFLICT DO NOTHING; counted in duplicate_sources_skipped.
-      - Every source_chunks row stores `embedding_model` in metadata JSONB
-        (Pitfall 2.2 defense).
-
-    Returns IngestStats with counters.
+    Empty-text results skipped. Duplicates (same investigation, same content_hash)
+    skipped via ON CONFLICT.
     """
     stats = IngestStats()
     if not results:
@@ -195,7 +152,6 @@ def ingest_tool_results(
 
             content_hash = _sha256(result.text)
 
-            # Upsert source row. ON CONFLICT on (investigation_id, content_hash).
             src_row = conn.execute(
                 text(
                     """
@@ -214,7 +170,6 @@ def ingest_tool_results(
                     "inv": str(investigation_id),
                     "url": result.url,
                     "hash": content_hash,
-                    # Phase 2 local: synthetic s3 key placeholder (D-01). Phase 5 wires real S3.
                     "s3key": f"local://investigations/{investigation_id}/{content_hash}.txt",
                     "kind": result.source_kind,
                     "meta": json.dumps(
@@ -228,7 +183,6 @@ def ingest_tool_results(
             ).fetchone()
 
             if src_row is None:
-                # ON CONFLICT path — source already exists; don't re-chunk.
                 stats.duplicate_sources_skipped += 1
                 continue
 
@@ -240,7 +194,6 @@ def ingest_tool_results(
                 stats.chunks_skipped_empty += 1
                 continue
 
-            # Embed all chunks for this source in batched calls.
             embeddings = _embed_chunks([c.text for c in chunks])
 
             if len(embeddings) != len(chunks):
@@ -248,7 +201,6 @@ def ingest_tool_results(
                     f"Embedding count mismatch: got {len(embeddings)} for {len(chunks)} chunks"
                 )
 
-            # Bulk insert chunk rows. Pgvector accepts a vector literal cast.
             for chunk, embedding in zip(chunks, embeddings, strict=True):
                 conn.execute(
                     text(
@@ -268,7 +220,6 @@ def ingest_tool_results(
                         "txt": chunk.text,
                         "cs": chunk.char_start,
                         "ce": chunk.char_end,
-                        # Pitfall 2.2 defense — stamp embedding model on every chunk.
                         "meta": json.dumps({"embedding_model": EMBEDDING_MODEL_ID}),
                         "emb": _vector_literal(embedding),
                     },
