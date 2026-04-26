@@ -1,18 +1,7 @@
 """Pydantic request/response bodies for the investigations API.
 
-These are the contract the Next.js route handlers (Wave 3) talk to. FastAPI
-auto-validates request bodies via these classes — malformed input returns 422
-without touching the route handler body.
-
-Validation rules derive from:
-  - UI-SPEC §3 Form (maxLength 200 on company/url, optional context_hint).
-  - CONTEXT.md D-27 (reject non-http(s) URLs, obvious injection substrings).
-  - GUARD-03 REQUIREMENTS (rate limit + input validation at investigation kickoff).
-
-Rejected alternatives:
-  - Split name/url into two endpoints: two pages of routing for one product affordance.
-  - Skip max_length on context_hint: LLM prompts can grow unboundedly — 500 chars is
-    a reasonable ceiling that matches a tweet-length research context.
+FastAPI auto-validates request bodies against these classes; malformed input
+returns 422 without entering the route handler.
 """
 from __future__ import annotations
 
@@ -25,15 +14,16 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# Obvious injection-attempt substrings rejected by the POST validator (D-27).
-# This list is defense-in-depth; the main defense is parameterized SQL + GUARD-01 sandbox.
+# Defense-in-depth substring rejection. Real defenses are parameterized SQL
+# and the retrieved-content sandbox; these just stop the obvious payloads
+# at the front door so they never get logged or stored.
 _REJECT_SUBSTRINGS: tuple[str, ...] = (
-    "\x00",        # null byte
-    "`",           # backtick (shell/SQL injection marker)
-    "<script",     # XSS
-    "DROP TABLE",  # classic SQL injection signature
-    "ignore previous",     # common prompt-injection phrase
-    "ignore all previous", # variant
+    "\x00",
+    "`",
+    "<script",
+    "DROP TABLE",
+    "ignore previous",
+    "ignore all previous",
 )
 
 
@@ -45,7 +35,6 @@ def _is_url_like(value: str) -> bool:
 
 
 def _auto_prefix_https(value: str) -> str:
-    """Match UI-SPEC §3 behavior: auto-prefix https:// if TLD-pattern present and no scheme."""
     if "://" not in value and _TLD_PATTERN.search(value):
         return "https://" + value
     return value
@@ -75,7 +64,7 @@ class CreateInvestigationBody(BaseModel):
     @classmethod
     def _check_value(cls, v: str) -> str:
         _check_injection_patterns(v)
-        # Disallow raw newlines in the input field — prevents HINT_SEPARATOR smuggling.
+        # Newlines could smuggle a HINT_SEPARATOR into input_ref.
         if "\n" in v or "\r" in v:
             raise ValueError("guardrail_rejected")
         return v
@@ -89,7 +78,6 @@ class CreateInvestigationBody(BaseModel):
         return v
 
     def normalized_value(self) -> str:
-        """Return the input_ref value portion (pre-HINT_SEPARATOR)."""
         if self.kind == "url":
             prefixed = _auto_prefix_https(self.value)
             _validate_url_scheme(prefixed)
@@ -104,7 +92,7 @@ class CreateInvestigationResponse(BaseModel):
 
 
 class ReRunResponse(CreateInvestigationResponse):
-    """Same shape as create — re-run returns the id of the NEW investigation."""
+    """Re-run returns the id of the NEW investigation (same shape as create)."""
 
 
 class RenameInvestigationBody(BaseModel):
@@ -124,7 +112,7 @@ class InvestigationStatusResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     status: str
-    display_name: str  # company name/URL label sourced from investigations.input_ref (hint stripped)
+    display_name: str
     sources_count: int = 0
     claims_count: int = 0
     error: Optional[str] = None
@@ -153,14 +141,11 @@ class InvestigationListResponse(BaseModel):
 
 
 class ScorecardResponse(BaseModel):
-    """Eval scorecard surfaced on the brief — citation discipline made visible.
+    """Eval scorecard surfaced on the brief.
 
-    - `citation_precision`: share of grounded claims whose quoted_span is
-      verbatim substring of the cited chunk (normalized). 1.0 means every
-      citation verifies by ctrl-F.
-    - `grounding_rate`: share of synthesizer claims that the grounder
-      accepted. Low rate means many claims dropped rather than fabricate.
-    - `total_claims` / `grounded_claims`: the raw counts the ratios came from.
+    citation_precision: share of grounded claims whose quoted_span verifies
+    by ctrl-F against the cited chunk. 1.0 = every citation is a real quote.
+    grounding_rate: share of synthesizer claims the grounder accepted.
     """
     model_config = ConfigDict(from_attributes=True)
     citation_precision: float
@@ -180,10 +165,6 @@ class InvestigationBriefResponse(BaseModel):
     completed_at: Optional[datetime] = None
     scorecard: Optional[ScorecardResponse] = None
 
-
-# ---------------------------------------------------------------------------
-# Phase 6-lite chat (Plan 03-14)
-# ---------------------------------------------------------------------------
 
 class ChatMessageItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -206,10 +187,8 @@ class ChatTurnBody(BaseModel):
     @field_validator("question")
     @classmethod
     def _check(cls, v: str) -> str:
-        # Same substring denylist as CreateInvestigationBody — chat questions are
-        # another prompt-injection surface (Plan 03-08 classifier protects
-        # retrieved content at ingest, but the question itself also flows to
-        # Sonnet and must be filtered for the obvious attack phrases).
+        # Same denylist as CreateInvestigationBody — chat questions also
+        # flow to the synthesizer, so block obvious injection attempts here.
         _check_injection_patterns(v)
         return v
 

@@ -1,31 +1,15 @@
 """Investigations API — POST/GET/PATCH/DELETE/re-run.
 
-Every route:
-  - Is protected by Depends(require_clerk_user_id) — AUTH-01.
-  - Scopes all SQL on WHERE user_id = :clerk_user_id — D-24 row scoping.
-  - Uses parameterized SQL via SQLAlchemy text() — no string concat.
-  - Returns structured errors via HTTPException(detail=<machine-readable string>).
+Every route requires Depends(require_clerk_user_id), scopes SQL on
+`user_id = :clerk_user_id`, and uses parameterized text() (no string concat).
 
-POST dispatches pipeline via one of two modes, selected by DOSSIER_DISPATCH_MODE:
-  - "local" (default): FastAPI BackgroundTasks + linear pipeline (D-14, Phase 2).
-  - "lambda" (deployed): boto3.client('lambda').invoke(InvocationType='Event', ...)
-    self-invokes this same Lambda container with {"investigation_id": ...};
-    lambda_handler.py routes that to runner.handler -> run_graph (Phase 3).
-Swap is confined to the dispatch helpers at the top of this file.
+POST dispatches the pipeline via DOSSIER_DISPATCH_MODE:
+  - "local" (default): FastAPI BackgroundTasks runs the graph in-process.
+  - "lambda": boto3.invoke(InvocationType='Event') self-invokes this same
+    container; lambda_handler routes the event to runner.run_graph.
 
-Rate limit (D-27 / GUARD-03):
-  - 10 investigations per Clerk user per rolling 24h window.
-  - Applied to POST /investigations AND POST /investigations/:id/re-run
-    (both create new rows and run the pipeline).
-  - Enforced via SELECT COUNT(*) — cheap; no Redis dep.
-
-Rejected alternatives:
-  - arq/Celery: requires Redis (D-14).
-  - Skip rate limit: GUARD-03 requires it for v1.
-  - Rate-limit in middleware: middleware runs per request; placing it inline at the
-    POST handler is simpler for Phase 2 (Phase 3 can move to middleware).
-  - Separate display_name column: would need migration 0003; renaming input_ref
-    is semantically equivalent for Phase 2.
+Rate limit: 10 investigations per Clerk user per rolling 24h, enforced by
+SELECT COUNT(*) — cheap, no Redis.
 """
 from __future__ import annotations
 
@@ -65,10 +49,6 @@ router = APIRouter(prefix="/investigations", tags=["investigations"])
 
 RATE_LIMIT_PER_24H: int = 10
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _engine() -> Engine:
     return get_engine()
@@ -124,57 +104,26 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
 
 
 def _run_graph_sync(investigation_id: UUID) -> None:
-    """Sync wrapper that asyncio.runs the graph. BackgroundTasks takes sync
-    callables only; runner.run_graph is async. This is the local-dev-mode
-    adapter — exercises the same graph path as AWS so local behavior matches
-    production (no more 'works in pipeline.py but not graph' contract drift).
-    """
-    import asyncio  # noqa: PLC0415 — keep import local to dispatch path
+    """BackgroundTasks takes sync callables; runner.run_graph is async."""
+    import asyncio  # noqa: PLC0415
     from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
     asyncio.run(run_graph(str(investigation_id)))
 
 
 def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    """Local-dev dispatch — FastAPI BackgroundTasks runs the graph in-process.
-
-    Unified on the graph in the post-demo cleanup (previously ran the
-    linear pipeline.run_investigation). Keeps `uv run uvicorn` local-dev
-    workflow working without AWS, while exercising the same code path
-    production uses. See DECISIONS.md #12.
-    """
     background_tasks.add_task(_run_graph_sync, investigation_id)
 
 
 def _dispatch_lambda(investigation_id: UUID) -> None:
-    """Phase 3 deployed dispatch — fire-and-forget self-invoke of the same Lambda.
+    """Fire-and-forget self-invoke. The same container hosts the investigate
+    handler; InvocationType='Event' returns immediately so POST stays under the
+    Function URL's ~30s budget.
 
-    The container answering this request also hosts the investigate handler;
-    InvocationType='Event' queues the invocation and returns immediately (the
-    POST /investigations handler stays under the Function URL's ~30s budget),
-    and the freshly invoked container wakes up with {"investigation_id": ...}
-    which lambda_handler.py routes to runner.handler -> run_graph.
-
-    Why boto3 + self-invoke rather than SQS/EventBridge/Step Functions:
-      - SQS would need a second Lambda (SQS trigger) + a queue resource +
-        IAM wiring. For 2-day demo, the Lambda quota of self-invokes is
-        fine (one per POST /investigations; rate-limited to 10/user/day
-        upstream via _check_rate_limit).
-      - EventBridge has higher latency (best-effort seconds) and adds a rule
-        resource per event pattern.
-      - Step Functions is overkill when the graph itself has resume semantics
-        via AsyncPostgresSaver checkpointing.
-
-    Env vars:
-      LAMBDA_FUNCTION_NAME — self-reference string injected by Terraform
-        (infra/terraform/lambda.tf:locals.composed_env_vars). Distinct from
-        AWS_LAMBDA_FUNCTION_NAME (AWS-injected at runtime), which runner.py
-        reads for its is-Lambda security check. Do not conflate.
-
-    boto3 is imported at call time so the unit-test suite (which never
-    exercises this path; DOSSIER_DISPATCH_MODE defaults to local) doesn't
-    pay the ~150ms boto3 import cost on every test run.
+    Picked over SQS / EventBridge / Step Functions because the per-user 10/day
+    rate limit caps Lambda self-invocations well below quota and avoids the
+    extra resources / IAM wiring those alternatives need.
     """
-    import boto3  # noqa: PLC0415 — intentional lazy import
+    import boto3  # noqa: PLC0415
 
     function_name = get_settings().lambda_function_name
     if not function_name:
@@ -182,28 +131,21 @@ def _dispatch_lambda(investigation_id: UUID) -> None:
             "LAMBDA_FUNCTION_NAME env var required when DOSSIER_DISPATCH_MODE=lambda"
         )
 
-    client = boto3.client("lambda")  # region from AWS_REGION / IAM role default
+    client = boto3.client("lambda")
     client.invoke(
         FunctionName=function_name,
-        InvocationType="Event",  # fire-and-forget: returns immediately, ~ms latency
+        InvocationType="Event",
         Payload=json.dumps({"investigation_id": str(investigation_id)}).encode(),
     )
     logger.info(
         "dispatch_lambda: queued investigation_id=%s on function=%s",
-        investigation_id,
-        function_name,
+        investigation_id, function_name,
     )
 
 
 def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    """Mode-selecting dispatch. Reads DOSSIER_DISPATCH_MODE at call time.
-
-    Modes:
-      - "local" (default): Phase 2 BackgroundTasks + linear pipeline
-      - "lambda": Phase 3 boto3 self-invoke of the investigate handler
-
-    Read at call time (not at import time) so flipping the env var in tests or
-    between local uvicorn runs takes effect without a process restart.
+    """Read DOSSIER_DISPATCH_MODE at call time so flipping it doesn't need a
+    process restart.
     """
     mode = get_settings().dispatch_mode
     if mode == "lambda":
@@ -211,15 +153,8 @@ def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID
     elif mode == "local":
         _dispatch_local(background_tasks, investigation_id)
     else:
-        # Pydantic Literal validation should make this branch unreachable.
-        raise RuntimeError(
-            f"unknown DOSSIER_DISPATCH_MODE={mode!r}; expected 'local' or 'lambda'"
-        )
+        raise RuntimeError(f"unknown DOSSIER_DISPATCH_MODE={mode!r}")
 
-
-# ---------------------------------------------------------------------------
-# POST /investigations (INPUT-01 / INPUT-02 / INPUT-04 / GUARD-03)
-# ---------------------------------------------------------------------------
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED, response_model=CreateInvestigationResponse)
 def create_investigation(
@@ -231,7 +166,6 @@ def create_investigation(
 
     _check_rate_limit(eng, clerk_user_id)
 
-    # Run URL validation (outside of Pydantic so we can surface guardrail_rejected)
     try:
         normalized = body.normalized_value()
     except ValueError as exc:
@@ -261,25 +195,11 @@ def create_investigation(
     return CreateInvestigationResponse(id=investigation_id, status="queued")
 
 
-# ---------------------------------------------------------------------------
-# POST /investigations/upload (INPUT-03 — pitch-deck PDF, Phase 5-lite Plan 03-13)
-# ---------------------------------------------------------------------------
-
-# Demo-pressure tradeoffs:
-#   - 17 MB cap: prevents large-upload DoS on the single Lambda container while
-#     covering the ~98th percentile of real decks (most are 3–6 MB image-heavy;
-#     occasional 15 MB outliers with embedded rasters).
-#   - application/octet-stream accepted in addition to application/pdf because
-#     some clients (curl without -H) send the generic MIME. Magic-byte check
-#     is inside MarkItDown — it raises on non-PDF content.
-#   - Dispatch is pinned to BackgroundTasks even when DOSSIER_DISPATCH_MODE=lambda
-#     for name/URL investigations, because the deck's markdown isn't persisted to
-#     S3. The self-invoke Lambda event would have to carry the full text as a
-#     payload (256 KB Event-invoke limit would bite), or re-fetch from DB. Both
-#     are out of scope; Plan 03-14 could wire it.
-
-DECK_MAX_BYTES: int = 17 * 1024 * 1024  # 17 MB
-DECK_MIN_BYTES: int = 100  # below this it's not a real PDF
+# 17 MB cap covers the ~98th percentile of real decks; small enough to not
+# DoS the single Lambda. application/octet-stream is accepted because curl
+# without -H sends that — magic-byte check is inside MarkItDown.
+DECK_MAX_BYTES: int = 17 * 1024 * 1024
+DECK_MIN_BYTES: int = 100
 DECK_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
     {"application/pdf", "application/octet-stream"}
 )
@@ -296,9 +216,7 @@ def upload_deck_investigation(
     file: Annotated[UploadFile, File(...)],
     context_hint: Annotated[str | None, Form()] = None,
 ) -> CreateInvestigationResponse:
-    """Accept a pitch-deck PDF, convert via MarkItDown, dispatch pipeline."""
-    # Deferred import — keeps the API module cheap to load; MarkItDown pulls in
-    # pdfminer + lxml on first use.
+    """Convert an uploaded PDF via MarkItDown, dispatch as a deck investigation."""
     from dossier.investigate.deck import (  # noqa: PLC0415
         extract_company_from_markdown,
         pdf_to_markdown,
@@ -309,7 +227,6 @@ def upload_deck_investigation(
 
     _check_rate_limit(eng, clerk_user_id)
 
-    # Validate MIME + read bytes
     content_type = (file.content_type or "").lower()
     if content_type not in DECK_ALLOWED_CONTENT_TYPES:
         raise HTTPException(status_code=415, detail="pdf_required")
@@ -324,7 +241,7 @@ def upload_deck_investigation(
 
     try:
         markdown = pdf_to_markdown(raw, filename)
-    except Exception as exc:  # noqa: BLE001 — surface-all conversion errors as 422
+    except Exception as exc:  # noqa: BLE001
         logger.exception("MarkItDown failed on uploaded PDF: %s", filename)
         raise HTTPException(status_code=422, detail="pdf_conversion_failed") from exc
 
@@ -334,25 +251,20 @@ def upload_deck_investigation(
     _ensure_user_exists(eng, clerk_user_id)
 
     investigation_id = uuid4()
-    # Extract subject company from the deck's cover slide via Haiku so chat
-    # widen-search has a real name to scope to (filename-as-subject pulled
-    # unrelated companies — see 'Iyinoluwa Aboyeji' → Flutterwave contamination).
-    # Fail-open: if extraction returns None, fall back to the filename.
+    # Extract subject company from the cover slide via Haiku — using the
+    # filename pulled in unrelated companies during chat widen-search.
     extracted_company: str | None = None
     try:
         extracted_company = extract_company_from_markdown(markdown)
     except Exception:  # noqa: BLE001
-        logger.exception("deck: company-name extraction threw; falling back to filename")
+        logger.exception("deck: company extraction failed; falling back to filename")
     display_value = extracted_company or filename
     logger.info(
-        "deck upload: investigation_id=%s filename=%r extracted_company=%r using=%r",
+        "deck upload: investigation_id=%s filename=%r extracted=%r using=%r",
         investigation_id, filename, extracted_company, display_value,
     )
-    # input_ref is used as the investigation subject by chat widen-search and
-    # the LIB-01 list card heading; also referenced by `_resolve_inputs` on the
-    # deck branch. We PREFER the extracted company name but keep a filename
-    # reference in the hint suffix so the library card and debug logs can
-    # always link back to the upload.
+    # Keep the filename in the hint suffix so the library card and logs can
+    # always link back to the upload, even when display_value is the company.
     hint_parts: list[str] = []
     if extracted_company:
         hint_parts.append(f"deck: {filename}")
@@ -369,17 +281,14 @@ def upload_deck_investigation(
             {"id": str(investigation_id), "u": clerk_user_id, "v": input_ref},
         )
 
-    # Pinned to local dispatch; see the module-level note above.
+    # Pinned to local dispatch — deck markdown isn't persisted to S3 and the
+    # 256 KB Event-invoke payload limit can't carry it.
     background_tasks.add_task(
         run_deck_investigation, investigation_id, markdown, filename
     )
 
     return CreateInvestigationResponse(id=investigation_id, status="queued")
 
-
-# ---------------------------------------------------------------------------
-# GET /investigations (LIB-01)
-# ---------------------------------------------------------------------------
 
 @router.get("", response_model=InvestigationListResponse)
 def list_investigations(
@@ -406,10 +315,6 @@ def list_investigations(
     ]
     return InvestigationListResponse(items=items)
 
-
-# ---------------------------------------------------------------------------
-# GET /investigations/:id/status (INVEST-03)
-# ---------------------------------------------------------------------------
 
 @router.get("/{investigation_id}/status", response_model=InvestigationStatusResponse)
 def get_status(
@@ -441,10 +346,6 @@ def get_status(
     )
 
 
-# ---------------------------------------------------------------------------
-# GET /investigations/:id/brief (BRIEF-01 / BRIEF-06 — markdown payload)
-# ---------------------------------------------------------------------------
-
 @router.get("/{investigation_id}/brief", response_model=InvestigationBriefResponse)
 def get_brief(
     investigation_id: UUID,
@@ -467,10 +368,6 @@ def get_brief(
             {"id": str(investigation_id)},
         ).fetchall()
 
-    # Compute scorecard on the fly — same logic as `python -m dossier.eval.report`
-    # but scoped to this one investigation. Cheap (1 joined SELECT + ~30 Python
-    # substring checks). Returns None on failed/incomplete investigations so
-    # the UI can suppress the badge when there's no brief yet.
     scorecard = _compute_scorecard(eng, investigation_id) if row.status == "complete" else None
 
     return InvestigationBriefResponse(
@@ -486,14 +383,11 @@ def get_brief(
 
 
 def _compute_scorecard(eng: Engine, investigation_id: UUID) -> ScorecardResponse | None:
-    """Read claims + their grounded chunks; compute citation_precision + grounding_rate.
+    """Citation precision + grounding rate for one investigation.
 
-    Mirrors dossier.eval.report._fetch_claims_and_corpus' offset translation
-    (claims.grounded_span_start/end are SOURCE-absolute; chunk.text is local).
-    Returns None if no claims exist (degenerate) — UI then hides the badge.
+    grounded_span_start/end are SOURCE-absolute; chunk.text is local — translate
+    via chunk_char_start when checking the substring match.
     """
-    # Deferred import — eval.scorer pulls in tiktoken etc. which we don't want
-    # on every /brief read if it's a no-claims investigation.
     from dossier.eval.scorer import normalize  # noqa: PLC0415
     with eng.connect() as conn:
         rows = conn.execute(
@@ -533,25 +427,13 @@ def _compute_scorecard(eng: Engine, investigation_id: UUID) -> ScorecardResponse
     )
 
 
-# ---------------------------------------------------------------------------
-# Phase 6-lite chat (Plan 03-14 / CHAT-01 / CHAT-02)
-#
-# GET  /investigations/:id/chat → history (ordered by created_at ASC)
-# POST /investigations/:id/chat → one turn: retrieve top-k → Sonnet → persist
-#
-# Both routes reuse _load_user_investigation for authz (Clerk-user owns the
-# investigation or 404 — D-24 row scoping). The Sonnet call happens inline in
-# the POST handler (no BackgroundTasks) because the turn round-trip is the
-# user-visible latency; non-streaming JSON demo-lite per 03-14-PLAN.md.
-# ---------------------------------------------------------------------------
-
 @router.get("/{investigation_id}/chat", response_model=ChatHistoryResponse)
 def get_chat_history(
     investigation_id: UUID,
     clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
 ) -> ChatHistoryResponse:
     eng = _engine()
-    _load_user_investigation(eng, investigation_id, clerk_user_id)  # authz check
+    _load_user_investigation(eng, investigation_id, clerk_user_id)
     with eng.connect() as conn:
         rows = conn.execute(
             text(
@@ -580,19 +462,11 @@ def post_chat_turn(
     body: ChatTurnBody,
     clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
 ) -> ChatTurnResponse:
-    # Deferred import — keeps the routes module cheap to load and mirrors the
-    # deck.pdf_to_markdown pattern (Plan 03-13). The chat module pulls openai
-    # SDK + pgvector retrieval on first use.
     from dossier.investigate.chat import run_chat_turn  # noqa: PLC0415
 
     eng = _engine()
     row = _load_user_investigation(eng, investigation_id, clerk_user_id)
 
-    # Require the investigation to be complete — we only chat over grounded
-    # source chunks. `grounding`/`synthesizing`/`gathering` all map to the
-    # running state on the UI side, which gates the chat input (see
-    # frontend/components/ChatPane.tsx). Belt-and-suspenders here for direct
-    # API hits.
     if row.status != "complete":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -603,10 +477,6 @@ def post_chat_turn(
     return ChatTurnResponse(answer=answer, cited_chunk_ids=cited)
 
 
-# ---------------------------------------------------------------------------
-# PATCH /investigations/:id (LIB-03 rename)
-# ---------------------------------------------------------------------------
-
 @router.patch("/{investigation_id}", response_model=InvestigationListItem)
 def rename_investigation(
     investigation_id: UUID,
@@ -616,7 +486,7 @@ def rename_investigation(
     eng = _engine()
     row = _load_user_investigation(eng, investigation_id, clerk_user_id)
 
-    # Preserve the HINT_SEPARATOR tail if present (so the context_hint stays attached).
+    # Preserve the HINT_SEPARATOR tail so context_hint stays attached.
     original = row.input_ref or ""
     _, sep, hint = original.partition(HINT_SEPARATOR)
     new_input_ref = body.display_name + (HINT_SEPARATOR + hint if sep else "")
@@ -635,30 +505,21 @@ def rename_investigation(
     )
 
 
-# ---------------------------------------------------------------------------
-# DELETE /investigations/:id (LIB-03 + D-19 hard delete)
-# ---------------------------------------------------------------------------
-
 @router.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_investigation(
     investigation_id: UUID,
     clerk_user_id: Annotated[str, Depends(require_clerk_user_id)],
 ) -> None:
     eng = _engine()
-    _load_user_investigation(eng, investigation_id, clerk_user_id)  # 404 if not owner
+    _load_user_investigation(eng, investigation_id, clerk_user_id)
 
-    # ON DELETE CASCADE on sources → source_chunks; investigations also cascades to claims
-    # per migration 0001. One DELETE wipes the dependent rows.
+    # ON DELETE CASCADE on sources → source_chunks; investigations → claims.
     with eng.begin() as conn:
         conn.execute(
             text("DELETE FROM investigations WHERE id = :id AND user_id = :u"),
             {"id": str(investigation_id), "u": clerk_user_id},
         )
 
-
-# ---------------------------------------------------------------------------
-# POST /investigations/:id/re-run (LIB-02 + D-18)
-# ---------------------------------------------------------------------------
 
 @router.post("/{investigation_id}/re-run", status_code=status.HTTP_202_ACCEPTED, response_model=ReRunResponse)
 def re_run_investigation(
