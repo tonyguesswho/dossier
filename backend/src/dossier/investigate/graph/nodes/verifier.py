@@ -11,28 +11,34 @@ import logging
 from dossier.investigate.brief_schema import BRIEF_DB_SECTIONS
 
 from ..state import DossierState
+from ..state_accessors import set_reflection
 
 logger = logging.getLogger(__name__)
 
 
 async def run(state: DossierState) -> dict:
-    if state.get("reflection_count", 0) >= 2:
+    current_count = state.get("reflection_count", 0)
+    if current_count >= 2:
         logger.info("verifier: reflection cap reached — proceeding to synthesizer")
-        return {"should_regather": False, "targeted_sections": []}
+        return set_reflection(
+            count=current_count, should_regather=False, targeted_sections=[]
+        )
 
     claimed_sections = {c.section for c in state.get("draft_claims", [])}
     empty_sections = [s for s in BRIEF_DB_SECTIONS if s not in claimed_sections]
 
     if empty_sections:
         logger.info("verifier: empty sections=%s — re-gathering", empty_sections)
-        return {
-            "should_regather": True,
-            "targeted_sections": empty_sections,
-            "reflection_count": state.get("reflection_count", 0) + 1,
-        }
+        return set_reflection(
+            count=current_count + 1,
+            should_regather=True,
+            targeted_sections=empty_sections,
+        )
 
     logger.info("verifier: all sections covered — proceeding to synthesizer")
-    return {"should_regather": False, "targeted_sections": []}
+    return set_reflection(
+        count=current_count, should_regather=False, targeted_sections=[]
+    )
 
 
 def route(state: DossierState) -> str:

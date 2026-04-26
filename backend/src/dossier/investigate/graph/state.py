@@ -4,6 +4,11 @@ List fields use `Annotated[list[X], operator.add]` so parallel Send branches
 concatenate safely instead of fighting last-write-wins. Scalars replace on
 write per standard TypedDict semantics.
 
+Nodes do NOT write raw dicts to mutate state — they go through
+`state_accessors.append_*` (additive lists) and `state_accessors.set_*`
+(scalars). The accessor name encodes the reducer semantic so reviewers
+don't have to cross-reference annotations down here.
+
 Do NOT put raw source text in state. Chunk IDs and offsets travel here;
 the text lives in source_chunks and S3.
 """

@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from ..state import DossierState, DraftClaimRef
+from ..state_accessors import append_draft_claims
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ async def run(state: DossierState) -> dict:
         len(draft_claims), investigation_id_str,
     )
 
-    return {"draft_claims": draft_claims}
+    return append_draft_claims(draft_claims)
 
 
 __all__ = ["run"]

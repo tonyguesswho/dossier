@@ -23,6 +23,8 @@ from dossier.investigate.tools.crunchbase import search as crunchbase_search
 from dossier.investigate.tools.newsapi import search as newsapi_search
 from dossier.investigate.tools.types import ToolResult
 
+from ..state_accessors import append_retrieved_chunks
+
 from ..state import DossierState, RetrievedChunkRef
 from .ingest_and_embed import cache_tool_result
 
@@ -114,7 +116,7 @@ async def run_exa(state: DossierState) -> dict:
     _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_exa: company=%s got %d results", company, len(results))
-    return {"retrieved_chunks": refs}
+    return append_retrieved_chunks(refs)
 
 
 async def run_newsapi(state: DossierState) -> dict:
@@ -124,7 +126,7 @@ async def run_newsapi(state: DossierState) -> dict:
     _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_newsapi: company=%s got %d results", company, len(results))
-    return {"retrieved_chunks": refs}
+    return append_retrieved_chunks(refs)
 
 
 async def run_firecrawl(state: DossierState) -> dict:
@@ -133,7 +135,7 @@ async def run_firecrawl(state: DossierState) -> dict:
     """
     input_url = state.get("input_url")
     if not input_url:
-        return {"retrieved_chunks": []}
+        return append_retrieved_chunks([])
 
     from dossier.investigate.tools.firecrawl import crawl_seed_url
 
@@ -149,14 +151,14 @@ async def run_firecrawl(state: DossierState) -> dict:
     _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="general")
     logger.info("run_firecrawl: url=%s got %d results", input_url, len(results))
-    return {"retrieved_chunks": refs}
+    return append_retrieved_chunks(refs)
 
 
 async def run_github_founder(state: DossierState) -> dict:
     """Per-founder GitHub search; current_founder injected by stage2_router."""
     founder = state.get("current_founder", "")
     if not founder:
-        return {"retrieved_chunks": []}
+        return append_retrieved_chunks([])
 
     from dossier.investigate.tools.github import fetch_founder_profile
 
@@ -171,7 +173,7 @@ async def run_github_founder(state: DossierState) -> dict:
     _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="founders")
     logger.info("run_github_founder: founder=%r got %d results", founder, len(results))
-    return {"retrieved_chunks": refs}
+    return append_retrieved_chunks(refs)
 
 
 async def run_crunchbase(state: DossierState) -> dict:
@@ -180,7 +182,7 @@ async def run_crunchbase(state: DossierState) -> dict:
     _cache_results(state["investigation_id"], results)
     refs = _tool_results_to_chunk_refs(results, section_hint="company")
     logger.info("run_crunchbase: company=%s got %d results", company, len(results))
-    return {"retrieved_chunks": refs}
+    return append_retrieved_chunks(refs)
 
 
 __all__ = [

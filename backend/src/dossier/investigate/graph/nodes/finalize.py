@@ -17,6 +17,7 @@ from uuid import UUID
 from sqlalchemy import text
 
 from ..state import DossierState, DraftClaimRef, GroundedClaimRef
+from ..state_accessors import append_grounded_claims
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ async def run(state: DossierState) -> dict:
         investigation_id_str, len(grounded),
     )
 
-    return {"grounded_claims": grounded}
+    return append_grounded_claims(grounded)
 
 
 __all__ = ["run"]

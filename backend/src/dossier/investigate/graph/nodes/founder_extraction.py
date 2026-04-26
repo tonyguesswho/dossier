@@ -24,6 +24,7 @@ from typing import Any
 from dossier.core.llm import CHEAP_MODEL_ID, strong_model
 
 from ..state import DossierState, FounderCandidates
+from ..state_accessors import append_founder_candidates
 
 logger = logging.getLogger(__name__)
 
@@ -113,14 +114,14 @@ async def run(state: DossierState, *, client: Any | None = None) -> dict:
             "founder_extraction: LLM call failed for company=%s",
             company, exc_info=True,
         )
-        return {"founder_candidates": []}
+        return append_founder_candidates([])
 
     if parsed is None or not parsed.founders:
         logger.info(
             "founder_extraction: no founders for company=%s — Stage-2 will be Crunchbase-only",
             company,
         )
-        return {"founder_candidates": []}
+        return append_founder_candidates([])
 
     # Cap at 5 here; stage2_router caps again as belt-and-suspenders.
     names: list[str] = []
@@ -133,7 +134,7 @@ async def run(state: DossierState, *, client: Any | None = None) -> dict:
         "founder_extraction: company=%s extracted %d founder(s): %r",
         company, len(names), names,
     )
-    return {"founder_candidates": names}
+    return append_founder_candidates(names)
 
 
 __all__ = ["run"]

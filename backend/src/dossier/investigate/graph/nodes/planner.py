@@ -6,6 +6,7 @@ import logging
 from dossier.investigate.brief_schema import BRIEF_DB_SECTIONS
 
 from ..state import DossierState
+from ..state_accessors import set_reflection
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +16,8 @@ async def run(state: DossierState) -> dict:
         "planner: investigation_id=%s company=%s",
         state["investigation_id"], state["company"],
     )
-    return {
-        "targeted_sections": list(BRIEF_DB_SECTIONS),
-        "reflection_count": 0,
-        "should_regather": False,
-    }
+    return set_reflection(
+        count=0,
+        should_regather=False,
+        targeted_sections=list(BRIEF_DB_SECTIONS),
+    )
