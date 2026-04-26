@@ -23,8 +23,8 @@ from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
 from dossier.core.llm import structured_call
-from dossier.investigate import repository as repo
-from dossier.investigate.retrieve import RetrievedChunk, retrieve_top_k
+from dossier.investigate import corpus, repository as repo
+from dossier.investigate.retrieve import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
@@ -123,73 +123,6 @@ def resolve_citations(answer_text: str, url_by_chunk: dict[str, str]) -> str:
 WEAK_RETRIEVAL_DISTANCE = 0.4
 
 
-def _widen_search(
-    investigation_id: UUID,
-    question: str,
-    eng: Engine,
-) -> int:
-    """Fresh subject-scoped Exa search; ingest into this investigation. Never
-    raises — chat must complete with whatever the original retrieval produced.
-
-    Subject scoping is critical: a generic "where is HQ" embedded alone matches
-    headquarters pages for any famous company. Always prefix with the subject
-    so Exa returns pages about THIS company.
-    """
-    try:
-        from dossier.investigate.tools import exa as exa_tool
-        from dossier.investigate.ingest import ingest_tool_results
-        from dossier.investigate.tools.types import ToolResult
-    except Exception:
-        logger.exception("chat: widen-search imports failed")
-        return 0
-
-    subject = repo.get_investigation_subject(eng, investigation_id)
-    if not subject:
-        # Refuse to widen without a subject — would pollute the corpus with
-        # whatever Exa thinks the question is about.
-        logger.warning("chat: widen-search skipped — no subject found")
-        return 0
-
-    scoped_query = f"{subject}: {question}"
-    logger.info("chat: widen-search query=%r", scoped_query[:120])
-
-    try:
-        new_results = exa_tool.search(scoped_query, num_results=3)
-    except Exception:
-        logger.warning("chat: widen Exa failed", exc_info=True)
-        return 0
-
-    if not new_results:
-        return 0
-
-    # Tag widened chunks so audits can find them and a cleanup query can prune
-    # corpus pollution if the question was off-target despite the subject.
-    tagged_results = [
-        ToolResult(
-            url=r.url,
-            source_kind=r.source_kind,
-            text=r.text,
-            title=r.title,
-            fetched_at=r.fetched_at,
-            raw_metadata={
-                **r.raw_metadata,
-                "widened_from_chat": True,
-                "widen_subject": subject,
-                "widen_question": question[:200],
-            },
-        )
-        for r in new_results
-    ]
-
-    try:
-        ingest_tool_results(investigation_id, tagged_results, engine=eng)
-    except Exception:
-        logger.exception("chat: widen-ingest failed")
-        return 0
-
-    return len(tagged_results)
-
-
 def run_chat_turn(
     investigation_id: UUID,
     question: str,
@@ -207,19 +140,20 @@ def run_chat_turn(
 
     subject = repo.get_investigation_subject(eng, investigation_id)
 
-    retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
+    retrieved = corpus.top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
     top_distance = retrieved[0].distance if retrieved else None
     is_weak = (not retrieved) or (top_distance is not None and top_distance > WEAK_RETRIEVAL_DISTANCE)
 
-    widened_count = 0
     if is_weak:
         logger.info(
             "chat: weak retrieval (top_distance=%s) — widening for %r",
             top_distance, question[:80],
         )
-        widened_count = _widen_search(investigation_id, question, eng)
+        widened_count = corpus.widen(
+            investigation_id, subject=subject, question=question, engine=eng
+        )
         if widened_count > 0:
-            retrieved = retrieve_top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
+            retrieved = corpus.top_k(investigation_id, question, k=DEFAULT_CHAT_TOP_K)
 
     if not retrieved:
         empty_reply = "I don't have any source material for this investigation yet."
@@ -235,7 +169,7 @@ def run_chat_turn(
         question, retrieved, subject=subject, client=client
     )
 
-    url_by_chunk = repo.url_by_chunk(eng, investigation_id)
+    url_by_chunk = corpus.urls_by_chunk(eng, investigation_id)
     resolved = resolve_citations(answer.answer_text, url_by_chunk)
 
     repo.insert_chat_turn_pair(
