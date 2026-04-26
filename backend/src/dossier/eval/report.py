@@ -1,16 +1,11 @@
-"""Citation-precision scorecard over all completed investigations.
+"""Citation-precision scorecard over completed investigations.
 
-Runs `citation_precision()` from the Phase 1 scorer against the live DB.
-Produces the numbers the demo slide quotes.
-
-Usage (from backend/):
-    uv run python -m dossier.eval.report          # all investigations
+    uv run python -m dossier.eval.report          # all
     uv run python -m dossier.eval.report --limit 10
-    uv run python -m dossier.eval.report --json   # machine-readable output
+    uv run python -m dossier.eval.report --json
 
-Why this lives in src/ rather than scripts/: it's an evaluated artifact of
-the project, not a one-off harness. A panelist can import it. Phase 4's
-UI scorecard integration is a downstream caller.
+Lives in src/ rather than scripts/ because Phase 4's UI scorecard is a
+downstream caller — panelists can import it.
 """
 from __future__ import annotations
 
@@ -31,10 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _fetch_complete_investigations(engine: Any, limit: int | None) -> list[dict]:
-    """Return complete investigations ordered by most recent completion."""
-    # investigations has no `company_name` column — the user-facing name is
-    # `input_ref` when input_type='name' (a URL otherwise). Good enough for
-    # the scorecard's display column.
+    # No company_name column on investigations — input_ref doubles as the label.
     sql = (
         "SELECT id::text, input_ref, completed_at "
         "FROM investigations "
@@ -51,12 +43,12 @@ def _fetch_complete_investigations(engine: Any, limit: int | None) -> list[dict]
 def _fetch_claims_and_corpus(
     engine: Any, investigation_id: str
 ) -> tuple[list[Claim], dict[str, str]]:
-    """Return (claims with quoted_span derived from chunk slice, corpus: chunk_id → text).
+    """quoted_span is derived from sc.text[start:end] when grounding succeeded.
+    Ungrounded claims (NULL grounded_source_chunk_id) get empty source_chunk_id
+    so citation_precision scores them 0.
 
-    A claim's `quoted_span` is derived from `source_chunks.text[start:end]` when
-    the grounder successfully pinned the claim. Ungrounded claims (NULL
-    grounded_source_chunk_id) are returned with an empty `source_chunk_id` so
-    citation_precision scores them 0 per D-10 case 5.
+    grounded_span_start/end are SOURCE-absolute; sc.text is the chunk-local
+    substring. Translate via chunk_char_start before slicing.
     """
     with engine.connect() as conn:
         rows = conn.execute(
@@ -80,9 +72,6 @@ def _fetch_claims_and_corpus(
             and start is not None and end is not None
             and chunk_char_start is not None
         ):
-            # claims.grounded_span_start/end are SOURCE-ABSOLUTE offsets (into
-            # the full fetched source), while sc.text is the chunk's local
-            # substring. Translate to chunk-local before slicing.
             local_start = start - chunk_char_start
             local_end = end - chunk_char_start
             quoted = chunk_text[local_start:local_end]
@@ -98,7 +87,7 @@ def _fetch_claims_and_corpus(
                 section="",
                 claim_text=claim_text,
                 quoted_span="",
-                source_chunk_id="",  # scores 0 per citation_precision
+                source_chunk_id="",
             ))
     return claims, corpus
 
@@ -111,20 +100,19 @@ def build_report(limit: int | None) -> dict:
     rows: list[dict] = []
     total_claims = 0
     total_grounded = 0
-    total_grounded_hits = 0  # grounded claims whose quoted_span substrings into the chunk
+    total_grounded_hits = 0
 
     for inv in investigations:
         claims, corpus = _fetch_claims_and_corpus(engine, inv["id"])
         grounded_claims = [c for c in claims if c.source_chunk_id]
         grounded = len(grounded_claims)
-        # Precision over ALL claims (ungrounded count as 0 — pessimistic, full-funnel view)
+        # Pessimistic full-funnel view (ungrounded count as 0).
         precision_all = citation_precision(claims, corpus) if claims else 0.0
-        # Precision over GROUNDED subset only — by construction should be ~1.0 if
-        # grounder stores offsets correctly. Deviation points to grounder bugs.
+        # Should be ~1.0 if the grounder stores offsets correctly. Lower means
+        # there's a grounder bug.
         precision_grounded = (
             citation_precision(grounded_claims, corpus) if grounded_claims else 0.0
         )
-        # Hit count for this investigation (grounded AND quoted_span in chunk)
         hits_this = int(round(precision_grounded * grounded))
         total_claims += len(claims)
         total_grounded += grounded

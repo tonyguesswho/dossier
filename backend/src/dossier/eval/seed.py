@@ -1,24 +1,11 @@
-"""Load the 10-company eval set into the `eval_items` table.
+"""Seed the eval_items table from EVAL_COMPANIES + golds/*.json. Idempotent.
 
-This script is idempotent: running it twice changes no rows (the primary key is the
-company_name, which is unique — re-seeds replace gold_brief_json and holdout via UPSERT).
+    cd backend && uv run python -m dossier.eval.seed
 
-Usage:
-    cd backend
-    # Make sure docker-compose postgres is running and migration 0001 applied.
-    uv run python -m dossier.eval.seed
-
-The script reads `EVAL_COMPANIES` from `dossier.eval.companies` and gold briefs from
-`backend/eval/golds/*.json`. Companies flagged `gold_filename=...` have their gold
-loaded and stored as `eval_items.gold_brief_json` (JSONB). Companies without a
-`gold_filename` (holdout + gold headroom) get `gold_brief_json = NULL`.
-
-Each gold file goes through `GoldClaim` Pydantic validation before the UPSERT —
-if the shape is wrong (missing source_text, invalid section literal, etc.), the
-seed script exits non-zero and no rows are written.
-
-The `_meta` block in each gold JSON (authoring instructions) is filtered out —
-only the `claims` array is persisted.
+Reads `EVAL_COMPANIES` and gold briefs from `backend/eval/golds/*.json`.
+Each gold goes through `GoldClaim` validation before the UPSERT — bad
+shape exits non-zero, no rows written. The `_meta` authoring block in
+each gold file is filtered out.
 """
 from __future__ import annotations
 
@@ -37,17 +24,11 @@ from dossier.core.settings import Settings, get_settings
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# Resolve golds/ dir from this file: backend/src/dossier/eval/seed.py
 # parents: [0]=eval, [1]=dossier, [2]=src, [3]=backend
 _GOLDS_DIR = pathlib.Path(__file__).resolve().parents[3] / "eval" / "golds"
 
 
 def _load_gold_claims(filename: str) -> list[GoldClaim]:
-    """Read a gold JSON file and validate it into GoldClaim objects.
-
-    Filters out the `_meta` authoring instructions block.
-    Raises ValidationError if any claim violates the D-02 contract.
-    """
     path = _GOLDS_DIR / filename
     if not path.exists():
         raise FileNotFoundError(
@@ -57,39 +38,31 @@ def _load_gold_claims(filename: str) -> list[GoldClaim]:
     data = json.loads(path.read_text())
     raw_claims = data.get("claims", [])
     if not raw_claims:
-        raise ValueError(
-            f"Gold brief {path} has no `claims` — authoring incomplete (see _meta.instructions)."
-        )
-    # Reject placeholder content — the stub's example claim_text starts with "Replace with".
+        raise ValueError(f"Gold brief {path} has no `claims`.")
+    # Reject the stub's placeholder content.
     for i, claim in enumerate(raw_claims):
         if claim.get("claim_text", "").startswith("Replace"):
             raise ValueError(
-                f"Gold brief {path} claim #{i} is still a stub (claim_text starts with 'Replace'). "
-                f"Author real claims before seeding."
+                f"Gold brief {path} claim #{i} is still a stub — author real claims first."
             )
     return [GoldClaim(**claim) for claim in raw_claims]
 
 
 def _gold_json_payload(company: EvalCompany) -> str | None:
-    """Return the JSONB payload for eval_items.gold_brief_json, or None for ungolded companies."""
     if company.gold_filename is None:
         return None
     claims = _load_gold_claims(company.gold_filename)
-    # Store as list[dict] so the JSONB column is a clean array of GoldClaim objects.
     return json.dumps([c.model_dump() for c in claims])
 
 
 def upsert_eval_items(database_url: str) -> dict[str, int]:
-    """Upsert all EVAL_COMPANIES into the eval_items table. Idempotent.
-
-    Uniqueness is on (company_name) — we use ON CONFLICT against that column.
+    """Upsert all EVAL_COMPANIES. Adds the unique constraint on company_name
+    if it isn't already there — the seed script owns it because it's a
+    seed-script concern, not a migration concern.
     """
     engine = create_engine(database_url, future=True)
     stats = {"inserted": 0, "updated": 0, "total_rows": 0}
 
-    # Add a unique constraint on company_name if it doesn't already exist.
-    # This is idempotent via DO $$ ... EXCEPTION block pattern.
-    # (Migration 0001 doesn't add this — seed.py owns it because it's a seed-script concern.)
     with engine.begin() as conn:
         conn.execute(
             text(
@@ -148,11 +121,9 @@ def upsert_eval_items(database_url: str) -> dict[str, int]:
 
 
 def main() -> int:
-    # Settings raises ValidationError if DATABASE_URL is missing — friendlier
-    # CLI experience to catch that here and print the same legacy message.
     try:
         database_url = get_settings().database_url
-    except Exception:  # noqa: BLE001 — pydantic.ValidationError + sub-types
+    except Exception:  # noqa: BLE001
         print(
             "ERROR: DATABASE_URL not set. Copy .env.example to .env and fill local creds.",
             file=sys.stderr,
@@ -162,11 +133,8 @@ def main() -> int:
     summary = split_summary()
     logger.info(
         "Seeding eval_items: total=%d, train=%d, holdout=%d, golded=%d, verticals=%d",
-        summary["total"],
-        summary["train"],
-        summary["holdout"],
-        summary["golded"],
-        summary["verticals"],
+        summary["total"], summary["train"], summary["holdout"],
+        summary["golded"], summary["verticals"],
     )
 
     try:
@@ -180,9 +148,7 @@ def main() -> int:
 
     logger.info(
         "Seed complete: inserted=%d updated=%d total_rows_in_table=%d",
-        stats["inserted"],
-        stats["updated"],
-        stats["total_rows"],
+        stats["inserted"], stats["updated"], stats["total_rows"],
     )
     return 0
 

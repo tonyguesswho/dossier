@@ -1,28 +1,11 @@
-"""Single-Lambda entry point for Dossier.
+"""Single-Lambda entry point. One container, one handler, dispatches on event shape:
 
-One container image, one handler. Dispatches on event shape:
-  - {"investigation_id": "<uuid>"}  -> investigate path (runner.handler)
-  - API Gateway / Function URL HTTP event  -> FastAPI via Mangum
+    {"investigation_id": "..."} → runner.handler (graph run)
+    Function URL HTTP event     → Mangum → FastAPI
 
-Why one Lambda, not two (api-lambda + investigate-lambda split from
-CLAUDE.md's "locked decisions"):
-  The two-Lambda split is the correct production shape — api-lambda has
-  a tight 30s timeout and no cold-start cost for polling; investigate-lambda
-  carries the 900s timeout + heavier memory needed by LangGraph. For the
-  2-day capstone demo we collapsed that into one image to keep the deploy
-  story to a single `docker push` and one Terraform resource (see
-  03-10-SUMMARY.md "Decisions and tradeoffs" #1). The event-shape dispatch
-  below is the seam where the split will re-land: swap `if "investigation_id"
-  in event` for a separate Lambda function and the FastAPI side of this file
-  is untouched.
-
-Why lifespan="off":
-  FastAPI's startup/shutdown events don't fit the per-request Lambda model.
-  Startup would run on every cold start (fine) but also expects a matching
-  shutdown (never fires — Lambda freezes/thaws the process, it doesn't
-  gracefully terminate). Turning lifespan off means we don't register
-  resources via lifespan context managers; module-level globals (engine,
-  langfuse client) are fine because they're lazy-initialized on first use.
+The intended production shape is a two-Lambda split (thin api + heavy
+investigate). Collapsed to one image for the demo to keep deployment to
+a single `docker push`; the dispatch below is where the split will re-land.
 """
 from __future__ import annotations
 
@@ -39,44 +22,32 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_event_loop() -> None:
-    """Mangum 0.19 calls asyncio.get_event_loop(); Python 3.12 changed this
-    to raise RuntimeError when no loop is set on the main thread (instead of
-    auto-creating one as <=3.10 did). Lambda's runtime never primes a loop,
-    so every Mangum request crashes here with `RuntimeError: There is no
-    current event loop in thread 'MainThread'`. Pre-create one if missing.
+    """Mangum 0.19 calls asyncio.get_event_loop(); Python 3.12+ raises
+    RuntimeError when no loop is set on the main thread instead of auto-
+    creating one. Lambda never primes a loop, so we do it here.
     """
     try:
         asyncio.get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
 
-# Mangum wraps the FastAPI ASGI app so Lambda HTTP events become ASGI calls.
-# Constructed at module import time -> shared across warm invocations.
+
+# lifespan="off" because Lambda freezes/thaws the process — startup/shutdown
+# events don't fit. Module-level globals (engine, langfuse) are lazy.
 _mangum = Mangum(app, lifespan="off")
 
 
 def handler(event: dict, context: Any) -> Any:
-    """AWS Lambda entry point. Dispatches on event shape.
-
-    The two event shapes never overlap:
-      - Self-invoke payload: {"investigation_id": "..."} (no requestContext,
-        no HTTP body — the API route handler we dispatch to doesn't look at
-        `context`, it just reads investigation_id and runs the graph).
-      - Function URL event: has `requestContext.http.method`, headers, body.
-        Mangum unpacks that into an ASGI scope/receive/send pair.
-
-    "investigation_id" is a safe selector because Mangum/Function URL events
-    never put that key at the top level of the event dict.
+    """The two event shapes never overlap. Function URL events never carry
+    `investigation_id` at the top level, which makes it a safe selector.
     """
     if "investigation_id" in event:
         logger.info("lambda_handler: dispatching to runner.handler")
         return runner.handler(event, context)
 
-    # Mangum's API Gateway v2 handler hard-requires `requestContext.http.sourceIp`
-    # but Lambda Function URL events sometimes omit it (depends on runtime
-    # version + IP-attribution config). Inject a sentinel so Mangum can unpack
-    # the scope; the value is only used for ASGI scope.client[0] which our
-    # FastAPI app doesn't read for routing.
+    # Mangum's API Gateway v2 handler hard-requires sourceIp, but Lambda
+    # Function URL events sometimes omit it. Inject a sentinel so the ASGI
+    # scope can unpack — our app doesn't read scope.client[0] for routing.
     request_ctx = event.get("requestContext", {})
     http_ctx = request_ctx.get("http", {}) if isinstance(request_ctx, dict) else {}
     if isinstance(http_ctx, dict) and "sourceIp" not in http_ctx:
