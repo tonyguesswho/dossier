@@ -1,25 +1,12 @@
-"""The Dossier evaluation set — locked on Day 2 (2026-04-22) per CONTEXT.md D-13.
+"""The Dossier evaluation set — single source of truth for the eval split.
 
-**Integrity contract:** this file is the single source of truth for which companies
-are in the eval set, which are holdout, and which receive hand-authored gold briefs.
-Any change requires a git commit with a rationale — no silent swaps.
+10 companies from YC W25 Demo Day, 6 train / 4 holdout. Holdout metrics are
+the honest measurement and must NEVER be used to tune prompts or thresholds.
+3 of the 6 train companies have hand-authored gold briefs (used for
+brief_similarity); the other 3 contribute to citation_precision and
+hallucination_rate only.
 
-**Scope (revised Day 2, per CONTEXT.md D-11/D-12/D-14):**
-  - 10 companies from YC W25 Demo Day (https://techcrunch.com/2025/03/13/10-startups-to-watch-from-y-combinators-w25-demo-day/)
-  - 6 train / 4 holdout (40% holdout ratio preserved from the original 8/20 D-12)
-  - 3 of the 6 train companies get hand-authored gold briefs; the other 3 are
-    "gold headroom" for a Phase 4 prep session if bandwidth permits
-  - 6 verticals covered: AI infra, AI tooling, Consumer, Vertical SaaS, Devtools, Robotics
-
-**Why this split matters (Pitfall 4.5 defense — "eval set built after agent"):**
-  - Holdout companies are NEVER used to tune prompts, retriever thresholds, or agent
-    behavior. Their metrics (citation_precision, hallucination_rate) are the honest
-    measurement Phase 4 reports.
-  - Gold companies are for prompt tuning + brief_similarity (cosine against gold).
-  - "Gold headroom" companies (Rebolt, Retrofit, Splash) are train-set but ungolded
-    — they participate in citation_precision/hallucination_rate but not brief_similarity.
-
-Source: YC W25 Demo Day, TechCrunch coverage dated 2025-03-13.
+Source: YC W25 Demo Day, TechCrunch coverage 2025-03-13.
 """
 from __future__ import annotations
 
