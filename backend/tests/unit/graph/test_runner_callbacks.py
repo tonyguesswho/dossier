@@ -1,21 +1,8 @@
-"""Runner.py Langfuse CallbackHandler wiring tests (Plan 03-07).
+"""Tests for Langfuse CallbackHandler plumbing in runner.run_graph.
 
-Verifies that runner.run_graph() plumbs the Langfuse LangChain CallbackHandler
-into graph.ainvoke(config=...) correctly:
-
-  1. get_langchain_callback_handler(trace_id=row.langfuse_trace_id, ...) is
-     called with the trace_id read from the investigations row (D-03).
-  2. config["callbacks"] contains the handler when the factory returns one.
-  3. config["callbacks"] is [] (not missing, not [None]) when the factory
-     returns None — Langfuse outage must not stall the graph (T-03-07-02).
-  4. config["metadata"]["langfuse_session_id"] == str(investigation_id) so
-     all per-investigation spans are grouped under one Langfuse Session in
-     the UI (4.x session plumbing goes via run metadata, not constructor).
-
-We do NOT spin up Postgres or Langfuse Cloud here — the test monkeypatches
-get_async_session, _get_checkpointer, build_graph, and
-get_langchain_callback_handler so we can inspect the call args observed by
-a spy graph.
+Verifies trace_id flow from the investigations row into the handler factory,
+that config['callbacks'] is [] (not missing) on Langfuse outage, and that
+session metadata is set so per-investigation spans group in the Langfuse UI.
 """
 from __future__ import annotations
 
@@ -27,11 +14,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from dossier.investigate.graph import runner as runner_mod
-
-
-# ---------------------------------------------------------------------------
-# Test doubles
-# ---------------------------------------------------------------------------
 
 
 class _FakeResult:
@@ -95,11 +77,6 @@ class _SpyGraph:
         return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture
 def patched_runner(monkeypatch):
     """Monkeypatches heavy deps on runner_mod's import paths + yields a handle.
@@ -147,11 +124,6 @@ def patched_runner(monkeypatch):
     handle["install"] = _install
     handle["run"] = lambda inv_id="inv-1": asyncio.run(runner_mod.run_graph(inv_id))
     return handle
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
 
 
 def test_callbacks_populated_when_handler_returned(patched_runner):

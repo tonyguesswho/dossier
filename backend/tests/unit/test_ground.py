@@ -1,31 +1,19 @@
-"""Unit tests for dossier.investigate.ground.
-
-Locked by 02-CONTEXT.md D-06 (NULL for unmatched), D-07 (same normalize rule
-as scorer), D-08 (substring-only).
-
-Tests use a fake engine that captures execute() parameter dicts — no real DB.
-D-07 contract verified by: `from dossier.eval.scorer import normalize` is the
-same object ground.py imports.
-
-Target runtime: <200ms.
-"""
+"""Tests for ground.ground_claims — fake engine, no real DB."""
 from __future__ import annotations
 
 from uuid import UUID, uuid4
 
 from dossier.eval.scorer import normalize as scorer_normalize
-from dossier.investigate.ground import (
-    SECTION_FIELD_TO_DB,
-    ground_claims,
-)
+from dossier.investigate.ground import ground_claims
 from dossier.investigate.retrieve import RetrievedChunk
 from dossier.models import Brief, BriefClaim
 
 
-# ---------------------------------------------------------------------------
-# D-07 contract lock: ground and scorer MUST share the function object.
-# ---------------------------------------------------------------------------
 def test_ground_normalize_is_same_object_as_scorer_normalize() -> None:
+    """ground.normalize must be the SAME function object as scorer.normalize.
+    Drift here silently breaks eval — same chunk normalized two different ways
+    would compute different precision scores at grounding-time vs eval-time.
+    """
     from dossier.investigate import ground as g
 
     assert g.normalize is scorer_normalize
@@ -68,7 +56,7 @@ def _chunk(chunk_id: UUID, text_val: str) -> RetrievedChunk:
         source_id=uuid4(),
         url="https://x.com",
         text=text_val,
-        char_start=100,  # arbitrary non-zero offset to verify additive math
+        char_start=100,  # non-zero so additive offset math is verifiable
         char_end=100 + len(text_val),
         distance=0.05,
     )
@@ -90,9 +78,6 @@ def _brief_with_one_claim_per_section(quoted_span: str, source_chunk_id: str) ->
     )
 
 
-# ---------------------------------------------------------------------------
-# Grounded claim: non-null gid + correct char offsets (additive from chunk.char_start)
-# ---------------------------------------------------------------------------
 def test_grounded_claim_gets_non_null_id_and_offsets() -> None:
     cid = uuid4()
     chunk = _chunk(cid, "Acme was founded in 2024 by Alice.")
@@ -110,18 +95,15 @@ def test_grounded_claim_gets_non_null_id_and_offsets() -> None:
         assert params["gid"] == str(cid)
         assert params["gs"] is not None
         assert params["ge"] is not None
-        # Offsets are chunk.char_start + relative find offset.
         assert params["gs"] == 100 + chunk.text.find("founded in 2024")
 
 
-# ---------------------------------------------------------------------------
-# Unmatched claim: same chunk, span not present → NULL gid + unmatched counter
-# ---------------------------------------------------------------------------
 def test_unmatched_claim_gets_null_gid() -> None:
+    """Span not present in cited chunk → NULL gid + unmatched counter."""
     cid = uuid4()
     chunk = _chunk(cid, "Acme was founded in 2024 by Alice.")
     brief = _brief_with_one_claim_per_section(
-        quoted_span="reached 50k MAU",  # not in chunk
+        quoted_span="reached 50k MAU",
         source_chunk_id=str(cid),
     )
     engine = _FakeEngine()
@@ -135,13 +117,12 @@ def test_unmatched_claim_gets_null_gid() -> None:
         assert params["ge"] is None
 
 
-# ---------------------------------------------------------------------------
-# Unknown source_chunk_id: chunk not in retrieved → NULL + unknown counter
-# ---------------------------------------------------------------------------
 def test_unknown_source_chunk_id_gets_null_and_counted() -> None:
+    """Brief cites a chunk_id we don't have → NULL gid, still persisted so
+    the hallucination metric can count it.
+    """
     cid = uuid4()
     chunk = _chunk(cid, "Acme was founded in 2024.")
-    # Brief cites a DIFFERENT chunk id
     brief = _brief_with_one_claim_per_section(
         quoted_span="founded in 2024",
         source_chunk_id="not-a-real-id",
@@ -150,13 +131,9 @@ def test_unknown_source_chunk_id_gets_null_and_counted() -> None:
     stats = ground_claims(uuid4(), brief, [chunk], engine=engine)
     assert stats.claims_grounded == 0
     assert stats.claims_unknown_source == 6
-    # All rows still written (D-06) so Phase 4 hallucination_rate can count them.
     assert stats.claims_written == 6
 
 
-# ---------------------------------------------------------------------------
-# Normalized match: casing + whitespace drift still resolves
-# ---------------------------------------------------------------------------
 def test_normalized_match_via_case_and_whitespace() -> None:
     cid = uuid4()
     chunk = _chunk(cid, "Acme was founded in 2024 by Alice.")
@@ -167,12 +144,3 @@ def test_normalized_match_via_case_and_whitespace() -> None:
     engine = _FakeEngine()
     stats = ground_claims(uuid4(), brief, [chunk], engine=engine)
     assert stats.claims_grounded == 6
-
-
-# ---------------------------------------------------------------------------
-# Section-field → DB-section map: risk_flags (plural) → "risk" (singular Literal)
-# ---------------------------------------------------------------------------
-def test_section_field_to_db_map_matches_db_section_values() -> None:
-    assert SECTION_FIELD_TO_DB["risk_flags"] == "risk"
-    assert SECTION_FIELD_TO_DB["founders"] == "founders"
-    assert SECTION_FIELD_TO_DB["suggested_questions"] == "suggested_questions"

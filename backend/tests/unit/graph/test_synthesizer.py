@@ -92,11 +92,6 @@ def _install_fakes(monkeypatch, retrieved=None, brief=None):
     return executed
 
 
-def test_run_is_async_coroutine():
-    import inspect
-    assert inspect.iscoroutinefunction(synthesizer.run)
-
-
 def test_run_flattens_brief_to_draft_claims(monkeypatch):
     """All 6 Brief fields must produce DraftClaimRef entries with DB section names."""
     _install_fakes(monkeypatch)

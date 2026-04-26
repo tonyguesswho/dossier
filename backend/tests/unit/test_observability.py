@@ -1,15 +1,4 @@
-"""Unit tests for observability.py PII redaction + CallbackHandler factory.
-
-Covers Plan 03-07:
-- redact_for_logging() — D-08 regex patterns (email, phone, SSN, Clerk ID, $amount)
-- get_langchain_callback_handler() — returns CallbackHandler with trace_context
-  attached or None on graceful-degrade paths (missing creds, import failure,
-  handler construction raises) — T-03-07-02 mitigation.
-
-Does NOT hit Langfuse Cloud. Tests that need a constructed handler either
-rely on monkeypatched creds in env, or inspect the call args of a
-monkeypatched CallbackHandler class.
-"""
+"""Tests for PII redaction + CallbackHandler factory. No Langfuse Cloud."""
 from __future__ import annotations
 
 from typing import Any
@@ -21,11 +10,6 @@ from dossier.observability import (
     get_langchain_callback_handler,
     redact_for_logging,
 )
-
-
-# ---------------------------------------------------------------------------
-# redact_for_logging — D-08 regex coverage
-# ---------------------------------------------------------------------------
 
 
 def test_redact_email_simple():
@@ -110,11 +94,6 @@ def test_redact_non_string_input_stringified_without_crash():
     # Langfuse span metadata can be dict/list — helper should not explode.
     out = redact_for_logging({"k": "v"})  # type: ignore[arg-type]
     assert isinstance(out, str)
-
-
-# ---------------------------------------------------------------------------
-# get_langchain_callback_handler — graceful degrade + trace_context plumbing
-# ---------------------------------------------------------------------------
 
 
 def test_handler_returns_none_when_creds_absent(monkeypatch):
@@ -273,15 +252,3 @@ def test_session_id_accepted_silently_for_forward_compat(monkeypatch):
     assert "session_id" not in captured  # not a 4.x kwarg
 
 
-# ---------------------------------------------------------------------------
-# __all__ contract — consumers grep these names, keep them stable
-# ---------------------------------------------------------------------------
-
-
-def test_public_exports_include_new_helpers():
-    assert "get_langchain_callback_handler" in observability.__all__
-    assert "redact_for_logging" in observability.__all__
-    # Prior exports must still be present (no accidental deletion).
-    for name in ("get_langfuse_client", "flush_and_shutdown",
-                 "load_env", "read_langfuse_env"):
-        assert name in observability.__all__

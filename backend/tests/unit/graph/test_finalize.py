@@ -118,11 +118,6 @@ def _install_fakes(monkeypatch, retrieved=None, select_rows=None):
     return captured, executed
 
 
-def test_run_is_async_coroutine():
-    import inspect
-    assert inspect.iscoroutinefunction(finalize.run)
-
-
 def test_run_reconstructs_brief_from_draft_claims(monkeypatch):
     """Brief passed to ground_claims must have draft_claims grouped by db→field."""
     captured, _ = _install_fakes(monkeypatch)

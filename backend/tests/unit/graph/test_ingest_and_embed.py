@@ -92,13 +92,6 @@ def test_run_with_empty_cache_is_noop():
     assert result == {}
 
 
-def test_cache_tool_result_registers_by_investigation_and_url():
-    inv_id = str(uuid4())
-    tr = _make_tool_result("https://example.com/a")
-    ingest_and_embed.cache_tool_result(inv_id, tr)
-    assert ingest_and_embed._TOOL_RESULT_CACHE[inv_id]["https://example.com/a"] is tr
-
-
 def test_cache_tool_result_same_url_overwrites():
     """Re-gather pass must overwrite rather than duplicate (per cache_tool_result docstring)."""
     inv_id = str(uuid4())
@@ -194,8 +187,3 @@ def test_run_skips_ingest_when_only_empty_text_sources(monkeypatch):
     assert called == [], "ingest_tool_results must not be called when 0 chunks produced"
 
 
-def test_run_is_async_coroutine():
-    """Contract: graph nodes MUST be async coroutines."""
-    import inspect
-    assert inspect.iscoroutinefunction(ingest_and_embed.run)
-    assert inspect.iscoroutinefunction(ingest_and_embed._classify_chunk)

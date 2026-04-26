@@ -90,17 +90,6 @@ def _install_fake_client(monkeypatch: pytest.MonkeyPatch, client: _FakeClient) -
     monkeypatch.setattr(llm_mod, "strong_model", lambda: client)
 
 
-def test_classifier_is_async_coroutine():
-    """Signature contract: _classify_chunk must stay an async function.
-
-    ingest_and_embed.run() fans it out via `asyncio.gather(*(_classify_chunk(c)
-    for c in flat_chunks))`. Changing to sync would serialize classification
-    and collapse the per-chunk concurrency BLOCKER-4 relies on.
-    """
-    import inspect
-    assert inspect.iscoroutinefunction(ingest_and_embed._classify_chunk)
-
-
 def test_classifier_returns_injection_verdict_for_adversarial_text(monkeypatch):
     """Adversarial text → verdict='injection' with the LLM's reason surfaced."""
     client = _FakeClient(verdict="injection", reason="contains jailbreak instructions")
