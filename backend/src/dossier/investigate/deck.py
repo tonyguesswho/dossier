@@ -22,7 +22,7 @@ from sqlalchemy.engine import Engine
 from pydantic import BaseModel, ConfigDict
 
 from dossier.core.db import get_engine
-from dossier.core.llm import CHEAP_MODEL_ID, strong_model
+from dossier.core.llm import structured_call
 from dossier.investigate import repository as repo
 from dossier.investigate.ingest import ingest_tool_results
 from dossier.investigate.tools.types import ToolResult
@@ -73,17 +73,16 @@ def extract_company_from_markdown(markdown: str, *, client=None) -> str | None:
         return None
 
     sample = markdown[:3000]
-    active_client = client if client is not None else strong_model()
     try:
-        completion = active_client.beta.chat.completions.parse(
-            model=CHEAP_MODEL_ID,
+        parsed = structured_call(
+            _ExtractedCompany,
             messages=[
                 {"role": "system", "content": _COMPANY_EXTRACT_SYSTEM},
                 {"role": "user", "content": sample},
             ],
-            response_format=_ExtractedCompany,
+            model="cheap",
+            client=client,
         )
-        parsed = completion.choices[0].message.parsed
     except Exception:
         logger.warning("deck: company extraction failed", exc_info=True)
         return None

@@ -21,7 +21,7 @@ import asyncio
 import logging
 from typing import Any
 
-from dossier.core.llm import CHEAP_MODEL_ID, strong_model
+from dossier.core.llm import structured_call_with_status
 
 from ..state import DossierState, FounderCandidates
 from ..state_accessors import append_founder_candidates
@@ -86,26 +86,24 @@ async def run(state: DossierState, *, client: Any | None = None) -> dict:
     )
 
     def _parse_sync() -> FounderCandidates | None:
-        active_client = client if client is not None else strong_model()
-        response = active_client.beta.chat.completions.parse(
-            model=CHEAP_MODEL_ID,
+        parsed, refusal = structured_call_with_status(
+            FounderCandidates,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format=FounderCandidates,
+            model="cheap",
+            client=client,
             temperature=0.1,
             max_tokens=512,
         )
-        message = response.choices[0].message
-        refusal = getattr(message, "refusal", None)
         if refusal:
             logger.warning(
                 "founder_extraction: model refused for company=%s: %s",
                 company, refusal,
             )
             return None
-        return getattr(message, "parsed", None)
+        return parsed
 
     try:
         parsed = await asyncio.to_thread(_parse_sync)

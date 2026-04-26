@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.core.llm import embedding_client, embedding_model
+from dossier.core.llm import embed
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +40,10 @@ def _vector_literal(vec: list[float]) -> str:
 
 
 def _embed_query(query: str) -> list[float]:
-    """Direct OpenAI — OpenRouter doesn't proxy /v1/embeddings.
+    """Single-query embedding via the shared `embed` helper.
     Module-scoped so tests can monkeypatch with a fixed vector.
     """
-    client = embedding_client()
-    resp = client.embeddings.create(model=embedding_model(), input=[query])
-    return resp.data[0].embedding
+    return embed([query])[0]
 
 
 def retrieve_top_k(

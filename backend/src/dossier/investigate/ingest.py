@@ -28,7 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.core.llm import EMBEDDING_MODEL_ID, embedding_client, embedding_model
+from dossier.core.llm import EMBEDDING_MODEL_ID, embed
 from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 # 800/120 in TOKENS, not chars. Char-based 800 splits mid-sentence on long paragraphs.
 CHUNK_SIZE_TOKENS: int = 800
 CHUNK_OVERLAP_TOKENS: int = 120
-
-EMBED_BATCH_SIZE: int = 100
 
 _TIKTOKEN_ENCODING: str = "cl100k_base"
 
@@ -104,17 +102,8 @@ def _chunk_text(full_text: str) -> list[ChunkSpan]:
 
 
 def _embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
-    """Embeddings go direct to api.openai.com — OpenRouter doesn't proxy /v1/embeddings."""
-    if not chunk_texts:
-        return []
-    client = embedding_client()
-    model = embedding_model()
-    embeddings: list[list[float]] = []
-    for i in range(0, len(chunk_texts), EMBED_BATCH_SIZE):
-        batch = chunk_texts[i : i + EMBED_BATCH_SIZE]
-        response = client.embeddings.create(model=model, input=batch)
-        embeddings.extend([d.embedding for d in response.data])
-    return embeddings
+    """Embeddings batched at DEFAULT_EMBED_BATCH_SIZE inside the helper."""
+    return embed(chunk_texts)
 
 
 def _sha256(text_value: str) -> str:

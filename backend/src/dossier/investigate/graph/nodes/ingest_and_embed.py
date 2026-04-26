@@ -105,12 +105,11 @@ async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tupl
     construction; capping further reintroduces a second-half-escape gap
     where injections past the cap never reach the judge.
     """
-    from dossier.core.llm import CHEAP_MODEL_ID, strong_model
+    from dossier.core.llm import structured_call_with_status
 
     def _parse_sync() -> _ClassifierVerdict | tuple[str, str]:
-        active_client = client if client is not None else strong_model()
-        response = active_client.beta.chat.completions.parse(
-            model=CHEAP_MODEL_ID,
+        parsed, refusal = structured_call_with_status(
+            _ClassifierVerdict,
             messages=[
                 {"role": "system", "content": _CLASSIFIER_SYSTEM_PROMPT},
                 {
@@ -118,16 +117,14 @@ async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tupl
                     "content": _CLASSIFIER_USER_TEMPLATE.format(chunk_text=chunk_text),
                 },
             ],
-            response_format=_ClassifierVerdict,
+            model="cheap",
+            client=client,
             max_tokens=256,
             temperature=0.0,
         )
-        message = response.choices[0].message
-        refusal = getattr(message, "refusal", None)
         if refusal:
             logger.warning("_classify_chunk: refusal — fail-open: %s", refusal)
             return "clean", "classifier refusal — fail-open"
-        parsed = getattr(message, "parsed", None)
         if parsed is None:
             logger.warning("_classify_chunk: parsed=None — fail-open")
             return "clean", "classifier parse failure — fail-open"

@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.core.llm import STRONG_MODEL_ID, strong_model
+from dossier.core.llm import structured_call
 from dossier.investigate import repository as repo
 from dossier.investigate.retrieve import RetrievedChunk, retrieve_top_k
 
@@ -85,16 +85,14 @@ def answer_with_citations(
     """Sonnet structured-output call. Fail-open on parsed=None — a malformed
     chat response degrades to a visible apology, never 500s the request.
     """
-    active_client = client if client is not None else strong_model()
-    completion = active_client.beta.chat.completions.parse(
-        model=STRONG_MODEL_ID,
+    parsed = structured_call(
+        ChatAnswer,
         messages=[
             {"role": "system", "content": _build_system_prompt(subject)},
             {"role": "user", "content": _build_user_prompt(question, retrieved)},
         ],
-        response_format=ChatAnswer,
+        client=client,
     )
-    parsed = completion.choices[0].message.parsed
     if parsed is None:
         logger.warning("chat: parsed=None; returning empty answer")
         return ChatAnswer(

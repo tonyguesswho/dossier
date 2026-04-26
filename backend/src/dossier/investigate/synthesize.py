@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from dossier.core.exceptions import PipelineError
-from dossier.core.llm import STRONG_MODEL_ID, strong_model
+from dossier.core.llm import structured_call_with_status
 from dossier.investigate.retrieve import RetrievedChunk
 from dossier.investigate.brief_schema import Brief
 
@@ -102,8 +102,6 @@ def synthesize_brief(
     client: Any | None = None,
 ) -> Brief:
     """Single-pass synthesizer. Raises PipelineError on refusal / parsed=None."""
-    active_client = client if client is not None else strong_model()
-
     user_prompt = USER_PROMPT_TEMPLATE.format(
         company=company,
         context_hint_block=_format_context_hint(context_hint),
@@ -111,30 +109,23 @@ def synthesize_brief(
     )
 
     try:
-        response = active_client.beta.chat.completions.parse(
-            model=STRONG_MODEL_ID,
+        brief, refusal = structured_call_with_status(
+            Brief,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format=Brief,
+            client=client,
         )
-    except PipelineError:
-        raise
     except Exception as exc:  # noqa: BLE001 — openai SDK raises various types
         raise PipelineError(f"Synthesizer LLM call failed: {exc}") from exc
 
-    message = response.choices[0].message
-    refusal = getattr(message, "refusal", None)
     if refusal:
         raise PipelineError(f"Synthesizer refused: {refusal}")
-
-    brief = getattr(message, "parsed", None)
     if brief is None:
         raise PipelineError(
             "Synthesizer returned malformed structured output (parsed=None)"
         )
-
     return brief
 
 
