@@ -64,7 +64,8 @@ class CreateInvestigationBody(BaseModel):
     @classmethod
     def _check_value(cls, v: str) -> str:
         _check_injection_patterns(v)
-        # Newlines could smuggle a HINT_SEPARATOR into input_ref.
+        # Guards the InvestigationInput encoding (see investigate.input_ref):
+        # a newline in the user value could smuggle a fake hint separator.
         if "\n" in v or "\r" in v:
             raise ValueError("guardrail_rejected")
         return v

@@ -140,8 +140,8 @@ WEAK_RETRIEVAL_DISTANCE = 0.4
 
 
 def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
-    """Pull input_ref, strip the HINT_SEPARATOR tail. Returns None if missing."""
-    from dossier.investigate.render import HINT_SEPARATOR  # noqa: PLC0415
+    """Pull input_ref, return the bare subject (drops any context hint)."""
+    from dossier.investigate.input_ref import InvestigationInput  # noqa: PLC0415
     with eng.connect() as conn:
         row = conn.execute(
             text("SELECT input_ref FROM investigations WHERE id = :id"),
@@ -149,7 +149,7 @@ def _investigation_subject(eng: Engine, investigation_id: UUID) -> str | None:
         ).fetchone()
     if row is None or not row[0]:
         return None
-    subject = row[0].split(HINT_SEPARATOR, 1)[0].strip()
+    subject = InvestigationInput.parse(row[0]).value.strip()
     return subject or None
 
 

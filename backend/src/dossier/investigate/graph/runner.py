@@ -82,9 +82,7 @@ async def run_graph(investigation_id: str) -> None:
 
     langfuse_client = get_langfuse_client(strict=False)
 
-    # company_name and context_hint live inside input_ref via HINT_SEPARATOR;
-    # the investigations table doesn't have separate columns for them.
-    from dossier.investigate.render import HINT_SEPARATOR  # noqa: PLC0415
+    from dossier.investigate.input_ref import InvestigationInput  # noqa: PLC0415
     async with get_async_session() as session:
         result = await session.execute(
             text(
@@ -102,10 +100,10 @@ async def run_graph(investigation_id: str) -> None:
         return
 
     input_type, input_ref, langfuse_trace_id = row
-    value, _, hint = (input_ref or "").partition(HINT_SEPARATOR)
-    company_name = value.strip() or "unknown"
-    context_hint = hint.strip() if hint else None
-    input_url = value.strip() if input_type == "url" else None
+    parsed = InvestigationInput.parse(input_ref)
+    company_name = parsed.value.strip() or "unknown"
+    context_hint = parsed.context_hint.strip() if parsed.context_hint else None
+    input_url = parsed.value.strip() if input_type == "url" else None
 
     checkpointer = await _get_checkpointer()
     graph = build_graph(checkpointer=checkpointer)

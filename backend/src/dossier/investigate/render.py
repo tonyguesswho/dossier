@@ -1,10 +1,7 @@
-"""Brief markdown rendering + the hint separator token shared across modules."""
+"""Brief markdown rendering."""
 from __future__ import annotations
 
 from dossier.models import Brief, BriefClaim
-
-
-HINT_SEPARATOR: str = "\n---HINT---\n"
 
 
 _SECTION_HEADINGS: list[tuple[str, str]] = [
@@ -40,4 +37,4 @@ def brief_to_markdown(brief: Brief, url_by_chunk: dict[str, str]) -> str:
     return "\n".join(out)
 
 
-__all__ = ["HINT_SEPARATOR", "brief_to_markdown"]
+__all__ = ["brief_to_markdown"]

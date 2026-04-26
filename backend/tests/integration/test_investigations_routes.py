@@ -131,7 +131,7 @@ def test_patch_rename_preserves_hint(client: TestClient) -> None:
     assert r.status_code == 200
     assert r.json()["display_name"] == "Acme AI v2"
 
-    # Read from DB and verify hint is still attached via HINT_SEPARATOR
+    # Read from DB and verify hint is still attached (InvestigationInput preserves it on rename)
     engine = db_module.get_engine()
     with engine.connect() as conn:
         row = conn.execute(

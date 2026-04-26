@@ -131,7 +131,7 @@ def test_callbacks_populated_when_handler_returned(patched_runner):
     fake_handler = object()
     patched_runner["row"] = (
         "name",                           # input_type
-        "Stripe",                         # input_ref (would carry HINT_SEPARATOR + hint in real rows)
+        "Stripe",                         # input_ref (real rows may carry an InvestigationInput-encoded hint tail)
         "lf-trace-abc-123",               # langfuse_trace_id
     )
     patched_runner["handler"] = fake_handler

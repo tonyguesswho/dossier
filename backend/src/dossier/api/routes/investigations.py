@@ -41,7 +41,7 @@ from dossier.api.schemas import (
 )
 from dossier.core.db import get_engine
 from dossier.core.settings import get_settings
-from dossier.investigate.render import HINT_SEPARATOR
+from dossier.investigate.input_ref import InvestigationInput
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +52,6 @@ RATE_LIMIT_PER_24H: int = 10
 
 def _engine() -> Engine:
     return get_engine()
-
-
-def _strip_hint(input_ref: str) -> str:
-    return input_ref.split(HINT_SEPARATOR, 1)[0]
-
-
-def _build_input_ref(value: str, context_hint: str | None) -> str:
-    if context_hint:
-        return f"{value}{HINT_SEPARATOR}{context_hint}"
-    return value
 
 
 def _check_rate_limit(eng: Engine, clerk_user_id: str) -> None:
@@ -177,7 +167,7 @@ def create_investigation(
     _ensure_user_exists(eng, clerk_user_id)
 
     investigation_id = uuid4()
-    input_ref = _build_input_ref(normalized, body.context_hint)
+    input_ref = InvestigationInput(value=normalized, context_hint=body.context_hint).serialize()
 
     with eng.begin() as conn:
         conn.execute(
@@ -270,7 +260,9 @@ def upload_deck_investigation(
         hint_parts.append(f"deck: {filename}")
     if context_hint:
         hint_parts.append(context_hint)
-    input_ref = _build_input_ref(display_value, " | ".join(hint_parts) or None)
+    input_ref = InvestigationInput(
+        value=display_value, context_hint=" | ".join(hint_parts) or None
+    ).serialize()
 
     with eng.begin() as conn:
         conn.execute(
@@ -307,7 +299,7 @@ def list_investigations(
     items = [
         InvestigationListItem(
             id=r.id,
-            display_name=_strip_hint(r.input_ref or ""),
+            display_name=InvestigationInput.parse(r.input_ref).value,
             status=r.status,
             started_at=r.started_at,
         )
@@ -337,7 +329,7 @@ def get_status(
     return InvestigationStatusResponse(
         id=row.id,
         status=row.status,
-        display_name=_strip_hint(row.input_ref or ""),
+        display_name=InvestigationInput.parse(row.input_ref).value,
         sources_count=sources_count,
         claims_count=claims_count,
         error=row.error,
@@ -372,7 +364,7 @@ def get_brief(
 
     return InvestigationBriefResponse(
         id=row.id,
-        display_name=_strip_hint(row.input_ref or ""),
+        display_name=InvestigationInput.parse(row.input_ref).value,
         status=row.status,
         brief_markdown=row.brief_markdown or "",
         sources=[SourceListItem(id=s.id, url=s.url, source_kind=s.source_kind) for s in sources],
@@ -486,10 +478,11 @@ def rename_investigation(
     eng = _engine()
     row = _load_user_investigation(eng, investigation_id, clerk_user_id)
 
-    # Preserve the HINT_SEPARATOR tail so context_hint stays attached.
-    original = row.input_ref or ""
-    _, sep, hint = original.partition(HINT_SEPARATOR)
-    new_input_ref = body.display_name + (HINT_SEPARATOR + hint if sep else "")
+    new_input_ref = (
+        InvestigationInput.parse(row.input_ref)
+        .with_value(body.display_name)
+        .serialize()
+    )
 
     with eng.begin() as conn:
         conn.execute(
