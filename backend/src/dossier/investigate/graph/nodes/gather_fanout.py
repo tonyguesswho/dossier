@@ -11,11 +11,17 @@ Tool nodes fail-open: any error logs and returns no chunks.
 Raw source text never enters graph state. Tool nodes register ToolResult
 objects in a module-level cache (ingest_and_embed drains it); state only
 carries chunk references.
+
+Every tool node is the same shape: invoke, fail-open with `[]`, cache
+results, build chunk refs, append to state. `_run_tool_node` is that
+template — each node function below is the per-tool *specification*
+(label, section hint, invocation) without re-stating the envelope.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Awaitable, Callable
 
 from langgraph.types import Send
 
@@ -58,6 +64,30 @@ def _tool_results_to_chunk_refs(
     return refs
 
 
+async def _run_tool_node(
+    state: DossierState,
+    *,
+    label: str,
+    section_hint: str,
+    invoke: Callable[[], Awaitable[list[ToolResult]]],
+) -> dict:
+    """Standard tool-node envelope: invoke, fail-open, cache, build refs, append.
+
+    `invoke` is a zero-arg coroutine factory so the per-tool argument-prep
+    stays at the call site. Any exception is logged + swallowed; the run
+    continues with the chunks other tools produced.
+    """
+    try:
+        results = await invoke()
+    except Exception:  # noqa: BLE001 — fail-open is the contract
+        logger.warning("run_%s: error", label, exc_info=True)
+        results = []
+    _cache_results(state["investigation_id"], results)
+    refs = _tool_results_to_chunk_refs(results, section_hint=section_hint)
+    logger.info("run_%s: got %d results", label, len(results))
+    return append_retrieved_chunks(refs)
+
+
 async def run(state: DossierState) -> dict:
     """Orchestration node — no state updates."""
     logger.info("gather_fanout: routing stage1 for company=%s", state["company"])
@@ -91,7 +121,6 @@ def stage2_router(state: DossierState) -> list[Send]:
 
 
 async def run_exa(state: DossierState) -> dict:
-    from dossier.investigate.tools.exa import ExaSearchError
     from dossier.investigate.tools.exa import search as exa_search
 
     company = state["company"]
@@ -104,35 +133,27 @@ async def run_exa(state: DossierState) -> dict:
     if context_hint:
         query = f"{query} {context_hint}"
 
-    try:
-        results = await asyncio.to_thread(exa_search, query)
-    except ExaSearchError:
-        logger.warning("run_exa: retries exhausted for %r", query, exc_info=True)
-        results = []
-    except Exception:  # noqa: BLE001 — never kill the run on Exa failure
-        logger.warning("run_exa: unexpected error for %r", query, exc_info=True)
-        results = []
-
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint="general")
-    logger.info("run_exa: company=%s got %d results", company, len(results))
-    return append_retrieved_chunks(refs)
+    return await _run_tool_node(
+        state,
+        label="exa",
+        section_hint="general",
+        invoke=lambda: asyncio.to_thread(exa_search, query),
+    )
 
 
 async def run_newsapi(state: DossierState) -> dict:
     company = state["company"]
     context_hint = state.get("context_hint")
-    results = await newsapi_search(company=company, context_hint=context_hint)
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint="general")
-    logger.info("run_newsapi: company=%s got %d results", company, len(results))
-    return append_retrieved_chunks(refs)
+    return await _run_tool_node(
+        state,
+        label="newsapi",
+        section_hint="general",
+        invoke=lambda: newsapi_search(company=company, context_hint=context_hint),
+    )
 
 
 async def run_firecrawl(state: DossierState) -> dict:
-    """Firecrawl deep-crawl, only when input_url is set. Sync wrapper enforces
-    the per-investigation budget; we run it on a thread to stay non-blocking.
-    """
+    """Firecrawl deep-crawl, only when input_url is set."""
     input_url = state.get("input_url")
     if not input_url:
         return append_retrieved_chunks([])
@@ -140,18 +161,14 @@ async def run_firecrawl(state: DossierState) -> dict:
     from dossier.investigate.tools.firecrawl import crawl_seed_url
 
     investigation_id = state["investigation_id"]
-    try:
-        results = await asyncio.to_thread(
+    return await _run_tool_node(
+        state,
+        label="firecrawl",
+        section_hint="general",
+        invoke=lambda: asyncio.to_thread(
             crawl_seed_url, input_url, investigation_id=investigation_id
-        )
-    except Exception:  # noqa: BLE001 — fail-open
-        logger.warning("run_firecrawl: error for url=%s", input_url, exc_info=True)
-        results = []
-
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint="general")
-    logger.info("run_firecrawl: url=%s got %d results", input_url, len(results))
-    return append_retrieved_chunks(refs)
+        ),
+    )
 
 
 async def run_github_founder(state: DossierState) -> dict:
@@ -162,27 +179,22 @@ async def run_github_founder(state: DossierState) -> dict:
 
     from dossier.investigate.tools.github import fetch_founder_profile
 
-    try:
-        results = await asyncio.to_thread(fetch_founder_profile, founder)
-    except Exception:  # noqa: BLE001 — fail-open
-        logger.warning(
-            "run_github_founder: error for founder=%r", founder, exc_info=True
-        )
-        results = []
-
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint="founders")
-    logger.info("run_github_founder: founder=%r got %d results", founder, len(results))
-    return append_retrieved_chunks(refs)
+    return await _run_tool_node(
+        state,
+        label="github_founder",
+        section_hint="founders",
+        invoke=lambda: asyncio.to_thread(fetch_founder_profile, founder),
+    )
 
 
 async def run_crunchbase(state: DossierState) -> dict:
     company = state["company"]
-    results = await crunchbase_search(company=company)
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint="company")
-    logger.info("run_crunchbase: company=%s got %d results", company, len(results))
-    return append_retrieved_chunks(refs)
+    return await _run_tool_node(
+        state,
+        label="crunchbase",
+        section_hint="company",
+        invoke=lambda: crunchbase_search(company=company),
+    )
 
 
 __all__ = [
