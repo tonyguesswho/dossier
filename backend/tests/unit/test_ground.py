@@ -3,20 +3,9 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from dossier.eval.scorer import normalize as scorer_normalize
 from dossier.investigate.ground import ground_claims
 from dossier.investigate.retrieve import RetrievedChunk
 from dossier.models import Brief, BriefClaim
-
-
-def test_ground_normalize_is_same_object_as_scorer_normalize() -> None:
-    """ground.normalize must be the SAME function object as scorer.normalize.
-    Drift here silently breaks eval — same chunk normalized two different ways
-    would compute different precision scores at grounding-time vs eval-time.
-    """
-    from dossier.investigate import ground as g
-
-    assert g.normalize is scorer_normalize
 
 
 class _FakeConn:

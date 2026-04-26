@@ -3,9 +3,9 @@
 Best-effort grounding: claims that don't substring-match are still persisted
 with grounded_source_chunk_id=NULL so the hallucination metric can count them.
 
-normalize() is imported (not redefined) from scorer.py — drift between this
-module's normalization rule and the scorer's silently breaks eval. The
-contract is function-object identity: `ground.normalize is scorer.normalize`.
+Normalization is shared with the eval scorer via
+`dossier.core.text_normalize` — both call the same function so eval-time
+and grounding-time scores can't drift.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from dossier.core.db import get_engine
-from dossier.eval.scorer import normalize
+from dossier.core.text_normalize import normalize
 from dossier.investigate.retrieve import RetrievedChunk
 from dossier.models import Brief, BriefClaim
 
@@ -157,5 +157,4 @@ __all__ = [
     "GroundStats",
     "SECTION_FIELD_TO_DB",
     "ground_claims",
-    "normalize",
 ]

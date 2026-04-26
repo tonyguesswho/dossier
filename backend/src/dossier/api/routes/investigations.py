@@ -388,7 +388,7 @@ def _compute_scorecard(eng: Engine, investigation_id: UUID) -> ScorecardResponse
     grounded_span_start/end are SOURCE-absolute; chunk.text is local — translate
     via chunk_char_start when checking the substring match.
     """
-    from dossier.eval.scorer import normalize  # noqa: PLC0415
+    from dossier.core.text_normalize import normalize  # noqa: PLC0415
     with eng.connect() as conn:
         rows = conn.execute(
             text(
