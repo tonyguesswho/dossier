@@ -31,38 +31,6 @@ Dossier compresses that research into a structured one-pager where **every claim
 
 ---
 
-## Eval numbers
-
-Run it yourself: `cd backend && uv run python -m dossier.eval.report`
-
-| Company | Claims | Grounded | Grounding rate | Precision (grounded) |
-|---|---|---|---|---|
-| paidhr | 34 | 28 | 82.4% | 100.0% |
-| Uber (deck) | 23 | 20 | 87.0% | 100.0% |
-| Buffer (deck) | 27 | 27 | 100.0% | 100.0% |
-| chowdeck | 32 | 28 | 87.5% | 100.0% |
-| andela.com | 31 | 25 | 80.6% | 100.0% |
-| x.com | 30 | 30 | 100.0% | 100.0% |
-| facebook | 35 | 19 | 54.3% | 100.0% |
-| linear | 22 | 17 | 77.3% | 100.0% |
-| **Aggregate** | **234** | **194** | **82.9%** | **100.0%** |
-
-**How to read this:** the synthesizer proposes ~30 claims per investigation. The grounder accepts ~83% on average. Of the accepted set, every quoted span is byte-identical to a substring of the cited source chunk. "Drop rather than fabricate" is the design posture.
-
----
-
-## Under the hood
-
-Most "cited AI" tools hallucinate the citation and hope you don't check. Dossier is built so you can check — and it'll pass.
-
-**Citations are verified before they leave the system.** The synthesizer outputs each claim with a `quoted_span` — the exact text it's sourcing from. Before anything reaches the database, `ground.py` runs a normalized substring match against the raw source chunk. If the span isn't in there, the claim is dropped. Not flagged, not softened — dropped. That's why precision is 100%: the only claims that make it through are the ones that can be proven.
-
-**The eval harness exists so this isn't just a claim.** Eight companies, scored deterministically from the database with a CLI tool (`dossier.eval.report`). No LLM judge scoring vibes — just byte-level substring matches counted up. You can run it yourself in 30 seconds.
-
-**The graph self-corrects.** After the synthesizer drafts the brief, a verifier node checks section coverage and citation density. If anything is thin, it routes back to the planner with a list of targeted gaps — not a full re-run, just a second gather pass for the weak spots. The loop is capped at 2 reflections so cost stays bounded. The result is a brief that's harder to poke holes in without running 4 minutes of compute to find out.
-
----
-
 ## Architecture
 
 ```
@@ -212,3 +180,35 @@ Required secrets (set in `infra/terraform/terraform.tfvars`):
 ├── DECISIONS.md              15 architectural choices with rejected alternatives
 └── Makefile                  build / push / deploy / migrate / logs
 ```
+
+---
+
+## Eval numbers
+
+Run it yourself: `cd backend && uv run python -m dossier.eval.report`
+
+| Company | Claims | Grounded | Grounding rate | Precision (grounded) |
+|---|---|---|---|---|
+| paidhr | 34 | 28 | 82.4% | 100.0% |
+| Uber (deck) | 23 | 20 | 87.0% | 100.0% |
+| Buffer (deck) | 27 | 27 | 100.0% | 100.0% |
+| chowdeck | 32 | 28 | 87.5% | 100.0% |
+| andela.com | 31 | 25 | 80.6% | 100.0% |
+| x.com | 30 | 30 | 100.0% | 100.0% |
+| facebook | 35 | 19 | 54.3% | 100.0% |
+| linear | 22 | 17 | 77.3% | 100.0% |
+| **Aggregate** | **234** | **194** | **82.9%** | **100.0%** |
+
+**How to read this:** the synthesizer proposes ~30 claims per investigation. The grounder accepts ~83% on average. Of the accepted set, every quoted span is byte-identical to a substring of the cited source chunk. "Drop rather than fabricate" is the design posture.
+
+---
+
+## Under the hood
+
+Most "cited AI" tools hallucinate the citation and hope you don't check. Dossier is built so you can check — and it'll pass.
+
+**Citations are verified before they leave the system.** The synthesizer outputs each claim with a `quoted_span` — the exact text it's sourcing from. Before anything reaches the database, `ground.py` runs a normalized substring match against the raw source chunk. If the span isn't in there, the claim is dropped. Not flagged, not softened — dropped. That's why precision is 100%: the only claims that make it through are the ones that can be proven.
+
+**The eval harness exists so this isn't just a claim.** Eight companies, scored deterministically from the database with a CLI tool (`dossier.eval.report`). No LLM judge scoring vibes — just byte-level substring matches counted up. You can run it yourself in 30 seconds.
+
+**The graph self-corrects.** After the synthesizer drafts the brief, a verifier node checks section coverage and citation density. If anything is thin, it routes back to the planner with a list of targeted gaps — not a full re-run, just a second gather pass for the weak spots. The loop is capped at 2 reflections so cost stays bounded. The result is a brief that's harder to poke holes in without running 4 minutes of compute to find out.
