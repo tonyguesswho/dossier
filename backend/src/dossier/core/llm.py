@@ -49,9 +49,6 @@ def structured_call_with_status(
     client: Any | None = None,
     **kwargs: Any,
 ) -> tuple[_S | None, str | None]:
-    # Returns (parsed, refusal) so synthesize.py can distinguish "model refused" from "malformed JSON".
-    # Retries up to 3 times on JSONDecodeError — OpenRouter occasionally returns a gateway
-    # error body that isn't valid JSON; this is always transient, never a logic bug.
     active_client = client if client is not None else strong_model()
     last_exc: Exception | None = None
     for attempt in range(3):
