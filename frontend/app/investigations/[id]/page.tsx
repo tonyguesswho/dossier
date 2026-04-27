@@ -1,33 +1,23 @@
 "use client";
 
 // /investigations/{id} — status-driven view switcher between RunningState and
-// BriefViewer, backed by TanStack Query polling. Final plan of Phase 2 Wave 3.
+// BriefViewer, backed by TanStack Query polling.
 //
-// Polling contract per CONTEXT.md D-22 + UI-SPEC §4:
-//   useQuery({
-//     queryKey: ['investigation', id, 'status'],
-//     queryFn: fetchStatus,
-//     refetchInterval: 2000,
-//     // Disabled once the pipeline reaches a terminal state.
-//   })
-//
-// When status transitions to complete/failed the refetchInterval returns false and
-// a second dependent useQuery for the full brief payload runs (only on complete).
-// This keeps the status poll cheap while running and pays the brief cost exactly once.
+// Polling contract (2s interval, stops on terminal state) and the dependent
+// brief query live in useInvestigation — this page only owns rendering.
 //
 // Rejected alternatives:
-//   - Server component with revalidate: adds a cache layer we don't need and would
-//     make 2s polling awkward.
-//   - Merged single query for both status + brief: would pay the brief cost every 2s
-//     while the pipeline is running; brief is expensive-ish (markdown + sources). Two
-//     queries wire the cheap/expensive split correctly.
+//   - Server component with revalidate: adds a cache layer we don't need and
+//     would make 2s polling awkward.
+//   - Merged single query for both status + brief: would pay the brief cost
+//     every 2s while the pipeline is running. Two queries wire the
+//     cheap/expensive split correctly.
 //   - Inline citation popovers / confidence badges: Phase 4 (BRIEF-02 / BRIEF-05).
 //   - Share button: Phase 6 "DO NOT RENDER" per UI-SPEC §5.
 //
-// Auth: the /api/investigations/* Next.js proxies from Plan 02-10 handle Clerk auth
-// and forward JWT to FastAPI. A 404 from the proxy means either not-found OR
-// belongs-to-another-user (D-24 row scoping) — both render the inline not-found UI.
-import { useQuery } from "@tanstack/react-query";
+// Auth: the /api/investigations/* Next.js proxies handle Clerk auth and forward
+// JWT to FastAPI. A 404 means not-found OR belongs-to-another-user (D-24 row
+// scoping) — both render the inline not-found UI.
 import { FileX } from "lucide-react";
 import Link from "next/link";
 import { use } from "react";
@@ -38,27 +28,7 @@ import { ChatPane } from "@/components/ChatPane";
 import { RunningState } from "@/components/RunningState";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { BriefResponse, StatusResponse } from "@/lib/types";
-
-const STATUS_POLL_MS = 2_000;
-
-async function fetchStatus(id: string): Promise<StatusResponse> {
-  const res = await fetch(`/api/investigations/${id}/status`, { cache: "no-store" });
-  if (res.status === 404) {
-    throw Object.assign(new Error("not_found"), { status: 404 });
-  }
-  if (!res.ok) throw new Error(`status failed: ${res.status}`);
-  return res.json();
-}
-
-async function fetchBrief(id: string): Promise<BriefResponse> {
-  const res = await fetch(`/api/investigations/${id}/brief`, { cache: "no-store" });
-  if (res.status === 404) {
-    throw Object.assign(new Error("not_found"), { status: 404 });
-  }
-  if (!res.ok) throw new Error(`brief failed: ${res.status}`);
-  return res.json();
-}
+import { useInvestigation } from "@/lib/hooks/use-investigation";
 
 export default function InvestigationDetailPage({
   params,
@@ -66,30 +36,8 @@ export default function InvestigationDetailPage({
   params: Promise<{ id: string }>;
 }) {
   // React 19 `use()` unwraps the Next.js 16 async params Promise at render time.
-  // Next.js 16 mandates params be Promise-typed for dynamic route segments.
   const { id } = use(params);
-
-  const statusQuery = useQuery<StatusResponse>({
-    queryKey: ["investigation", id, "status"],
-    queryFn: () => fetchStatus(id),
-    refetchInterval: (query) => {
-      const s = query.state.data?.status;
-      return s === "complete" || s === "failed" ? false : STATUS_POLL_MS;
-    },
-    // `retry: 1` is inherited from QueryProvider defaults; a 404 will still surface.
-  });
-
-  const briefQuery = useQuery<BriefResponse>({
-    queryKey: ["investigation", id, "brief"],
-    queryFn: () => fetchBrief(id),
-    enabled: statusQuery.data?.status === "complete",
-  });
-
-  // 404 handling — inline per UI-SPEC §7e. Also covers cross-user access (FastAPI
-  // returns 404 for rows belonging to another Clerk user, per Plan 02-09 T-02-09-05).
-  const statusErr = statusQuery.error as { status?: number } | undefined;
-  const briefErr = briefQuery.error as { status?: number } | undefined;
-  const notFound = statusErr?.status === 404 || briefErr?.status === 404;
+  const { statusQuery, briefQuery, notFound } = useInvestigation(id);
 
   if (notFound) {
     return (
@@ -106,7 +54,6 @@ export default function InvestigationDetailPage({
     );
   }
 
-  // Initial load — render the loading skeleton (UI-SPEC §5 shape).
   if (!statusQuery.data) {
     return (
       <main className="max-w-3xl mx-auto px-4 py-8">
@@ -122,10 +69,6 @@ export default function InvestigationDetailPage({
 
   const { status } = statusQuery.data;
 
-  // Brief view — only when status=complete AND the brief payload has landed.
-  // ChatPane renders below the brief in the same container. Gated on the same
-  // complete-status check so a running or failed investigation never shows the
-  // chat input (Phase 6-lite 03-14-PLAN.md — chat requires grounded chunks).
   if (status === "complete" && briefQuery.data) {
     return (
       <div className="min-h-screen bg-background">
@@ -136,7 +79,6 @@ export default function InvestigationDetailPage({
     );
   }
 
-  // Running or failed state.
   return (
     <div className="min-h-screen bg-background">
       <header

@@ -49,8 +49,12 @@ async def _run_tool_node(
 ) -> dict:
     try:
         results = await invoke()
-    except Exception:  # noqa: BLE001 — fail-open is the contract
-        logger.warning("run_%s: error", label, exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — fail-open is the contract
+        logger.warning(
+            "run_%s: %s — %s",
+            label, type(exc).__name__, exc,
+            exc_info=True,
+        )
         results = []
     refs = _tool_results_to_staged_sources(
         results,

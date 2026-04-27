@@ -267,10 +267,15 @@ def get_brief(
 
     scorecard: ScorecardResponse | None = None
     if row.status == "complete":
-        rows = repo.claim_grounding_rows(eng, investigation_id)
-        scorecard_data = compute_scorecard(rows)
-        if scorecard_data is not None:
-            scorecard = ScorecardResponse(**scorecard_data)
+        if row.scorecard_json:
+            # Stored at completion time by finalize — no per-request DB join needed.
+            scorecard = ScorecardResponse(**row.scorecard_json)
+        else:
+            # Fallback for investigations completed before migration 0006.
+            rows = repo.claim_grounding_rows(eng, investigation_id)
+            scorecard_data = compute_scorecard(rows)
+            if scorecard_data is not None:
+                scorecard = ScorecardResponse(**scorecard_data)
 
     return InvestigationBriefResponse(
         id=row.id,

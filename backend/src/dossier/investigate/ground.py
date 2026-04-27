@@ -24,6 +24,10 @@ class GroundStats(BaseModel):
     claims_unmatched: int = 0
     claims_unknown_source: int = 0
 
+    @property
+    def precision(self) -> float:
+        return self.claims_grounded / self.claims_written if self.claims_written else 0.0
+
 
 def _locate_span(chunk_text: str, quoted_span: str) -> tuple[int | None, int | None]:
     if not quoted_span:

@@ -76,7 +76,7 @@ def get_investigation_for_user(
         return conn.execute(
             text(
                 "SELECT id, user_id, status, input_type, input_ref, started_at, "
-                "       completed_at, brief_markdown, error "
+                "       completed_at, brief_markdown, error, scorecard_json "
                 "FROM investigations WHERE id = :id AND user_id = :u"
             ),
             {"id": str(investigation_id), "u": user_id},
@@ -274,7 +274,11 @@ async def aupdate_status(
 
 
 async def acomplete_investigation(
-    session: AsyncSession, investigation_id: str, brief_markdown: str
+    session: AsyncSession,
+    investigation_id: str,
+    brief_markdown: str,
+    *,
+    scorecard_json: str | None = None,
 ) -> None:
     # Caller batches with the grounded-claim SELECT in one transaction (see finalize.run).
     await session.execute(
@@ -282,10 +286,11 @@ async def acomplete_investigation(
             "UPDATE investigations "
             "SET status = CAST(:s AS investigation_status), "
             "    completed_at = now(), "
-            "    brief_markdown = :md "
+            "    brief_markdown = :md, "
+            "    scorecard_json = CAST(:sj AS JSONB) "
             "WHERE id = CAST(:id AS UUID)"
         ),
-        {"s": "complete", "md": brief_markdown, "id": investigation_id},
+        {"s": "complete", "md": brief_markdown, "sj": scorecard_json, "id": investigation_id},
     )
 
 

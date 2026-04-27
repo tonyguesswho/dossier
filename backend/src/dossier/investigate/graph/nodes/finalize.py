@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 from collections import defaultdict
 from uuid import UUID
@@ -19,8 +19,7 @@ async def run(state: DossierState) -> dict:
         BriefClaim,
         build_brief_from_grouped,
     )
-    from dossier.investigate.ground import ground_claims
-    from dossier.investigate.retrieve import retrieve_top_k
+    from dossier.investigate.citation_grounder import ground_and_render
 
     investigation_id_str = state["investigation_id"]
     investigation_uuid = UUID(investigation_id_str)
@@ -47,30 +46,21 @@ async def run(state: DossierState) -> dict:
         )
 
     brief = build_brief_from_grouped(grouped)
+    brief_md, stats = await ground_and_render(investigation_uuid, company, brief)
 
-    retrieved = await asyncio.to_thread(
-        retrieve_top_k, investigation_uuid, company, k=50
-    )
+    scorecard_json = json.dumps({
+        "citation_precision": stats.precision,
+        "grounding_rate": stats.precision,
+        "total_claims": stats.claims_written,
+        "grounded_claims": stats.claims_grounded,
+    })
 
-    await asyncio.to_thread(
-        ground_claims, investigation_uuid, brief, retrieved
-    )
-
-    # url_by_chunk spans the whole corpus, not just top-k — grounder may pin outside the window.
-    from dossier.investigate.render import brief_to_markdown as _brief_to_markdown  # noqa: PLC0415
-    url_by_chunk: dict[str, str] = {}
-    try:
-        async with get_async_session() as session:
-            url_by_chunk = await repo.aurl_by_chunk(session, investigation_id_str)
-    except Exception:  # noqa: BLE001 — last-mile render must never poison status
-        logger.exception("finalize: url_by_chunk lookup failed; rendering without links")
-    brief_md = _brief_to_markdown(brief, url_by_chunk)
-
-    # Status flip + grounded-claim readback in one tx so they observe a consistent snapshot.
     grounded: list[GroundedClaimRef] = []
     async with get_async_session() as session:
         async with session.begin():
-            await repo.acomplete_investigation(session, investigation_id_str, brief_md)
+            await repo.acomplete_investigation(
+                session, investigation_id_str, brief_md, scorecard_json=scorecard_json
+            )
             result = await repo.alist_grounded_claims(session, investigation_id_str)
             for row in result:
                 grounded.append(
@@ -90,4 +80,3 @@ async def run(state: DossierState) -> dict:
     )
 
     return append_grounded_claims(grounded)
-
