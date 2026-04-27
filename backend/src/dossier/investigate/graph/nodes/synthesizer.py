@@ -37,7 +37,6 @@ async def run(state: DossierState) -> dict:
             "synthesizer: 0 chunks retrieved — sections will be empty, verifier will re-gather",
         )
 
-    # Fail-fast on synthesis: synthesize_brief raises, runner marks the investigation failed.
     brief = await asyncio.to_thread(
         synthesize_brief, retrieved, company, context_hint
     )
@@ -66,5 +65,3 @@ async def run(state: DossierState) -> dict:
 
     return append_draft_claims(draft_claims)
 
-
-__all__ = ["run"]

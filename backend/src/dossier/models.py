@@ -1,5 +1,4 @@
 from __future__ import annotations
-# Eval-pipeline DB-row contracts. Brief / BriefClaim / BriefSection live in investigate.brief_schema.
 
 from typing import Optional
 from uuid import UUID
@@ -35,5 +34,3 @@ class GoldClaim(BaseModel):
     source_url: str
     source_text: str
 
-
-__all__ = ["Claim", "GoldClaim"]
