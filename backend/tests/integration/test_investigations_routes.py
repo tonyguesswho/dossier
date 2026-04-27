@@ -3,8 +3,6 @@
 Uses FastAPI TestClient + DOSSIER_AUTH_DEV_BYPASS to skip real Clerk auth.
 Monkeypatches _dispatch_pipeline to a no-op — pipeline orchestration is tested
 in tests/integration/test_pipeline_smoke.py.
-
-Locked by 02-CONTEXT.md D-14, D-18, D-19, D-23, D-24, D-27.
 Skipped when DATABASE_URL is not set.
 Target runtime: <5s.
 """
@@ -35,8 +33,6 @@ TEST_USER = "clerk-user-routes-test"
 @pytest.fixture(autouse=True)
 def _dev_bypass(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("DOSSIER_AUTH_DEV_BYPASS", TEST_USER)
-    # CLERK_JWKS_URL must be unset so the dev-bypass takes over; not required by Plan 02-03
-    # dependency shape but belt-and-suspenders.
     monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
 
 

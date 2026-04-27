@@ -1,6 +1,5 @@
 """Unit tests for dossier.investigate.tools.firecrawl.
 
-Locked by 02-CONTEXT.md D-11 (Firecrawl included) + D-13 (≤1 crawl/investigation).
 Mocks the FirecrawlApp class via monkeypatch; no real network calls.
 Target runtime: <200ms.
 

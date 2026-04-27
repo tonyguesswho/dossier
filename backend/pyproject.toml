@@ -70,8 +70,7 @@ packages = ["src/dossier"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration"]
-# Phase 2 adds tests/integration/ per STACK.md §2.11 + CONTEXT.md D-15 logical module split.
-# tests/eval/ remains scaffolded-but-excluded; Phase 4 wires it in (CONTEXT §deferred).
+# Eval entry points live under `src/dossier/eval`; pytest covers unit and integration suites here.
 markers = [
     "integration: real DB + mocked HTTP (respx); slower than unit",
 ]

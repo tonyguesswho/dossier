@@ -2,8 +2,6 @@
 
 Uses respx to mock httpx — per STACK.md §2.11 + PATTERNS.md §"Apply to: tests that
 mock out external HTTP (Exa/GitHub/Firecrawl)".
-
-Locked by 02-CONTEXT.md D-11 (GitHub for INVEST-02) + STACK.md §2.4 (httpx direct).
 Target runtime: <300ms.
 """
 from __future__ import annotations

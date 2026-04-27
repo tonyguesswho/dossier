@@ -1,25 +1,8 @@
-"""Initial Dossier schema: pgvector extension, 7 tables, HNSW index.
+"""Create the initial Dossier schema.
 
 Revision ID: 0001
 Revises:
 Create Date: 2026-04-21
-
-Schema source: .planning/research/ARCHITECTURE.md §5 Data model.
-
-Phase 1 deviations (per .planning/phases/01-eval-harness-skeleton/01-CONTEXT.md):
-  D-01 / D-17: eval_items.gold_brief_json JSONB replaces gold_brief_markdown TEXT.
-               Gold briefs are stored as structured JSON per D-02 GoldClaim schema.
-  D-12 / D-17: eval_items.holdout BOOLEAN NOT NULL DEFAULT false is added.
-               Locks the 8/20 holdout split in-repo per D-13.
-
-Deferred tables (Phase 6):
-  chat_sessions, chat_messages — grounded chat is Phase 6 scope per CHAT-* requirements.
-
-Index strategy (STACK.md §2.3):
-  HNSW with vector_cosine_ops for source_chunks.embedding. IVFFlat was rejected —
-  HNSW wins for <1M vectors + frequent writes, which matches the Dossier workload.
-  For this fresh migration the index is created inline on an empty table (fine at this scale);
-  real RDS deployments in Phase 3 may rebuild the index after bulk-load per STACK.md §2.3.
 """
 from __future__ import annotations
 

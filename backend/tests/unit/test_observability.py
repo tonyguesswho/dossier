@@ -76,7 +76,6 @@ def test_redact_empty_and_none_input():
 
 
 def test_redact_multiple_pii_in_one_string():
-    # Combined emission payload stress test — Plan 03-09 span inputs can mix several.
     raw = (
         "Founder alice@example.com (415-555-2671) SSN 987-65-4321 "
         "actor=user_2abCDef123456 raised $9876543210"
@@ -250,5 +249,4 @@ def test_session_id_accepted_silently_for_forward_compat(monkeypatch):
     h = get_langchain_callback_handler(trace_id="t", session_id="inv-42")
     assert h is not None
     assert "session_id" not in captured  # not a 4.x kwarg
-
 

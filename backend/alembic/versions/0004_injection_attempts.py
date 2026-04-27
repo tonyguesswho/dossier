@@ -1,20 +1,8 @@
-"""Add injection_attempts table for GUARD-02 prompt-injection quarantine.
+"""Add the injection_attempts table.
 
 Revision ID: 0004
 Revises: 0003
 Create Date: 2026-04-23
-
-Schema source: .planning/phases/03-langgraph-agent-aws-deployment/03-CONTEXT.md D-07.
-
-Chunks flagged as prompt-injection by the Haiku 4.5 classifier inside the
-ingest_and_embed node are written here instead of source_chunks. They never
-reach retrieval top-k, the synthesizer, or the final brief. The table persists
-raw payloads for post-hoc red-team analysis (D-07: synchronous block > async
-flag because a leaked injection corrupts the user-facing brief).
-
-Security note: raw_payload is TEXT (unbounded) — truncating would destroy
-red-team evidence value. DB storage cost is low relative to forensic value
-(T-03-01-03 accepted).
 """
 from __future__ import annotations
 

@@ -1,9 +1,5 @@
 """Unit tests for dossier.investigate.tools.exa.
 
-Locked by .planning/phases/02-single-pass-rag-pipeline/02-CONTEXT.md:
-  D-11: Exa is the primary web search tool in Phase 2.
-  D-09 §Claude's Discretion: fail-open on Exa empties.
-
 Tests mock the exa-py client via monkeypatch; no real network calls.
 Target runtime: <200ms.
 """

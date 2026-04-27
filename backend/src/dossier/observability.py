@@ -1,6 +1,4 @@
 from __future__ import annotations
-# Single Langfuse entry point. Don't `from langfuse import ...` elsewhere —
-# the deferred imports here are what keep env loading correct.
 
 import logging
 import pathlib
@@ -21,7 +19,6 @@ def load_env(env_path: pathlib.Path | None = None) -> None:
 
 
 def read_langfuse_env(strict: bool = True) -> _EnvTriple:
-    # strict=False returns empty strings so handlers can degrade to a no-op tracer.
     from dossier.core.settings import get_settings  # noqa: PLC0415
     settings = get_settings()
     public_key = (
@@ -52,7 +49,6 @@ def read_langfuse_env(strict: bool = True) -> _EnvTriple:
 
 
 def get_langfuse_client(strict: bool = True) -> Any:
-    # Read env BEFORE importing langfuse — its eager env read at import time misses runtime load_dotenv.
     read_langfuse_env(strict=strict)
     from langfuse import get_client  # noqa: PLC0415
 
@@ -60,7 +56,6 @@ def get_langfuse_client(strict: bool = True) -> Any:
 
 
 def flush_and_shutdown(client: Any, *, lambda_sleep: bool = False) -> None:
-    # lambda_sleep=True: 15s drain before container freeze. Without it ~30% of traces are lost.
     try:
         client.flush()
     except Exception:  # noqa: BLE001
@@ -78,11 +73,10 @@ def flush_and_shutdown(client: Any, *, lambda_sleep: bool = False) -> None:
 
 def get_langchain_callback_handler(
     trace_id: str | None = None,
-    session_id: str | None = None,  # noqa: ARG001 — accepted for symmetry; langfuse 4.x reads it from run metadata
+    session_id: str | None = None,  # noqa: ARG001
     *,
     strict: bool = False,
 ) -> Any | None:
-    # Returns None on missing creds / construction failure — Langfuse outage must not stall a run.
     try:
         public_key, secret_key, _host = read_langfuse_env(strict=strict)
         if not public_key or not secret_key:
@@ -103,9 +97,6 @@ def get_langchain_callback_handler(
         return None
 
 
-# Regex-only PII scrub for emission paths (Langfuse spans, log records).
-# NEVER apply at DB write — citation grounding does substring matching
-# against raw source_chunks.text, so redacting there breaks quote lookup.
 _PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"), "[EMAIL]"),
     (re.compile(r"\+1[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b"), "[PHONE]"),
