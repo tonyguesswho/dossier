@@ -19,7 +19,6 @@ from dossier.core.settings import Settings, get_settings
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-# parents: [0]=eval, [1]=dossier, [2]=src, [3]=backend
 _GOLDS_DIR = pathlib.Path(__file__).resolve().parents[3] / "eval" / "golds"
 
 
@@ -34,7 +33,6 @@ def _load_gold_claims(filename: str) -> list[GoldClaim]:
     raw_claims = data.get("claims", [])
     if not raw_claims:
         raise ValueError(f"Gold brief {path} has no `claims`.")
-    # Reject the stub's placeholder content.
     for i, claim in enumerate(raw_claims):
         if claim.get("claim_text", "").startswith("Replace"):
             raise ValueError(

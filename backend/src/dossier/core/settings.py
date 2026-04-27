@@ -7,7 +7,6 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# parents[0]=core, [1]=dossier, [2]=src, [3]=backend, [4]=repo root.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 
 
