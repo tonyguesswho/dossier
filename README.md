@@ -173,19 +173,6 @@ Required secrets (set in `infra/terraform/terraform.tfvars`):
 
 ---
 
-## Known limitations
-
-Honest gaps, not swept under the rug:
-
-- **Grounding rate is ~83%, not 100%.** Claims the synthesizer proposes but can't anchor to a verbatim source span are dropped. The brief is accurate but sometimes incomplete — some real facts don't survive the grounder if the source text is paraphrased rather than quoted directly.
-- **Single Lambda container.** The right architecture is two Lambdas: a thin `api-lambda` (30s timeout) for HTTP, and a heavy `investigate-lambda` (900s) for the graph. Collapsed to one image for demo simplicity. The dispatch seam is already cut in `lambda_handler.py`; splitting is purely additive.
-- **Deck upload async plumbing.** PDF investigations run as a Starlette BackgroundTask, which anyio runs in a worker thread while the Lambda event loop is live. The fix (`asyncio.run_coroutine_threadsafe`) is in `runner.run_graph_sync` — but this is the kind of subtle async bug that only surfaces at Lambda warm-start time, not locally.
-- **MarkItDown PDF extraction is text-only.** Image-heavy pitch decks produce sparse briefs. No vision-model fallback in the current build.
-- **RDS security group allows `0.0.0.0/0` on 5432.** Fine for demo, tighten to a specific CIDR for real traffic.
-- **OpenRouter transient errors.** OpenRouter occasionally returns non-JSON HTTP bodies to `beta.chat.completions.parse()`. Fixed with a 3-attempt retry on `JSONDecodeError` in `llm.structured_call_with_status`.
-
----
-
 ## Repo layout
 
 ```
