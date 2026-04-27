@@ -1,15 +1,3 @@
-"""Exa web search wrapper.
-
-Chosen over Tavily because Exa returns excerpts that downstream citation
-grounding can substring-match against. Tavily collapses to summaries.
-
-Fail-open: empty results return []. Network/5xx errors retry 3x then raise
-ExaSearchError; the caller decides whether to fail the investigation.
-
-Note: exa-py exposes both `search_and_contents` and a newer `search(contents=...)`.
-We use the older entry point because the unit tests monkeypatch it; swap is
-a one-liner if exa-py drops it.
-"""
 from __future__ import annotations
 
 import logging
@@ -36,7 +24,7 @@ def read_exa_env(strict: bool = True) -> str:
 
 
 class ExaSearchError(RuntimeError):
-    """Raised after retries exhaust on a non-recoverable Exa failure."""
+    pass
 
 
 def _extract_field(result: Any, name: str, default: Any = None) -> Any:
@@ -81,7 +69,6 @@ def _exa_call(query: str, num_results: int) -> list[dict[str, Any]]:
 
 
 def search(query: str, *, num_results: int = 8) -> list[ToolResult]:
-    """Run an Exa web search; return up to `num_results` ToolResult objects."""
     try:
         raw_results = _exa_call(query, num_results)
     except ExaSearchError:

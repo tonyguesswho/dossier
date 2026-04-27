@@ -1,11 +1,6 @@
-"""Seed the eval_items table from EVAL_COMPANIES + golds/*.json. Idempotent.
+"""Seed eval_items from EVAL_COMPANIES + golds/*.json. Idempotent.
 
     cd backend && uv run python -m dossier.eval.seed
-
-Reads `EVAL_COMPANIES` and gold briefs from `backend/eval/golds/*.json`.
-Each gold goes through `GoldClaim` validation before the UPSERT — bad
-shape exits non-zero, no rows written. The `_meta` authoring block in
-each gold file is filtered out.
 """
 from __future__ import annotations
 
@@ -56,10 +51,7 @@ def _gold_json_payload(company: EvalCompany) -> str | None:
 
 
 def upsert_eval_items(database_url: str) -> dict[str, int]:
-    """Upsert all EVAL_COMPANIES. Adds the unique constraint on company_name
-    if it isn't already there — the seed script owns it because it's a
-    seed-script concern, not a migration concern.
-    """
+    # Owns the company_name UNIQUE constraint here — it's seed-script concern, not a migration.
     engine = create_engine(database_url, future=True)
     stats = {"inserted": 0, "updated": 0, "total_rows": 0}
 

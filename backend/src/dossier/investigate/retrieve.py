@@ -1,9 +1,3 @@
-"""pgvector top-k retrieval scoped to one investigation.
-
-Operator: `<=>` (cosine distance) is the only one that hits the HNSW index
-created with `vector_cosine_ops`. `<->` (L2) or `<#>` (inner product) fall
-back to sequential scan, which blows the latency budget on real corpora.
-"""
 from __future__ import annotations
 
 import logging
@@ -22,8 +16,6 @@ DEFAULT_TOP_K: int = 6
 
 
 class RetrievedChunk(BaseModel):
-    """distance is raw pgvector `<=>` output: smaller = more similar (0 = identical)."""
-
     model_config = ConfigDict(from_attributes=True)
 
     chunk_id: UUID
@@ -32,6 +24,7 @@ class RetrievedChunk(BaseModel):
     text: str
     char_start: int
     char_end: int
+    # Raw pgvector `<=>` output: smaller = more similar (0 = identical).
     distance: float
 
 
@@ -40,9 +33,7 @@ def _vector_literal(vec: list[float]) -> str:
 
 
 def _embed_query(query: str) -> list[float]:
-    """Single-query embedding via the shared `embed` helper.
-    Module-scoped so tests can monkeypatch with a fixed vector.
-    """
+    # Module-scoped so tests can monkeypatch with a fixed vector.
     return embed([query])[0]
 
 
@@ -53,17 +44,15 @@ def retrieve_top_k(
     k: int = DEFAULT_TOP_K,
     engine: Engine | None = None,
 ) -> list[RetrievedChunk]:
-    """Top-k chunks scoped to investigation_id, closest first.
-
-    The WHERE s.investigation_id clause is mandatory — without it, retrieval
-    leaks across investigations (covered by test_retrieve_top_k_scoped_to_investigation).
-    """
     if not query or not query.strip():
         return []
 
     query_embedding = _embed_query(query)
     eng = engine if engine is not None else get_engine()
 
+    # `<=>` (cosine distance) is the only operator that hits the HNSW index
+    # built with vector_cosine_ops; `<->` and `<#>` fall back to seq scan.
+    # The investigation_id WHERE clause is mandatory — without it, retrieval leaks across investigations.
     with eng.connect() as conn:
         rows = conn.execute(
             text(

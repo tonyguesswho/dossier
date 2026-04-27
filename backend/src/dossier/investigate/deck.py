@@ -1,16 +1,3 @@
-"""Pitch-deck ingestion — PDF → markdown → graph.
-
-MarkItDown handles PDF parsing via pdfminer.six. Output for stylized text-box
-decks can be jumbled, but for whitepapers and reports it's clean.
-
-Pre-ingest the uploaded markdown as one synthetic ToolResult before invoking
-the graph. The graph reads input_type='deck' from the investigations row and
-short-circuits stage1/stage2 fan-out, so no web tools fire and the deck stays
-the only corpus.
-
-Dispatch is local-only — Lambda self-invoke for decks would need S3 to ferry
-the markdown (256 KB Event payload limit can't carry it).
-"""
 from __future__ import annotations
 
 import io
@@ -31,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def pdf_to_markdown(pdf_bytes: bytes, filename: str) -> str:
-    """Convert PDF bytes to markdown via MarkItDown."""
     from markitdown import MarkItDown  # noqa: PLC0415
 
     md = MarkItDown()
@@ -63,15 +49,11 @@ Rules:
 
 
 def extract_company_from_markdown(markdown: str, *, client=None) -> str | None:
-    """Subject-company extraction via Haiku. Returns None on uncertainty.
-
-    Truncates to the first 3000 chars — the cover and exec-summary slides
-    carry the brand name; further pages are body content that adds cost
-    without signal. Must never raise (caller falls back to filename).
-    """
+    # Caller falls back to filename on None; must never raise.
     if not markdown or not markdown.strip():
         return None
 
+    # Cover + exec summary carry the brand; further pages add cost without signal.
     sample = markdown[:3000]
     try:
         parsed = structured_call(
@@ -102,11 +84,6 @@ def run_deck_investigation(
     *,
     engine: Engine | None = None,
 ) -> None:
-    """Pre-ingest the deck as a synthetic ToolResult, then run the graph.
-
-    On pre-ingest failure we mark the investigation failed and return — the
-    graph is never run against a half-populated chunk table.
-    """
     import asyncio  # noqa: PLC0415
     from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
 
@@ -128,7 +105,8 @@ def run_deck_investigation(
         repo.mark_failed_with_error(eng, investigation_id, "deck ingest failed")
         return
 
-    asyncio.run(run_graph(str(investigation_id)))
+    from dossier.investigate.graph.runner import run_graph_sync  # noqa: PLC0415
+    run_graph_sync(str(investigation_id))
 
 
 __all__ = ["extract_company_from_markdown", "pdf_to_markdown", "run_deck_investigation"]

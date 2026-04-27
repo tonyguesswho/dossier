@@ -1,15 +1,6 @@
-"""The InvestigationInput value type — owner of the input_ref encoding.
-
-`investigations.input_ref` packs the user-supplied value (company name or
-URL) with an optional context hint into one column. This module is the
-only place that knows the rule. Callers parse and serialize through it;
-the separator token is private.
-
-The hint-newline guardrail in `api.schemas.CreateInvestigationBody` exists
-because parsing here splits on this exact token — leaking a newline into
-the user-supplied value would let it smuggle a fake hint.
-"""
 from __future__ import annotations
+# Owns the input_ref encoding (value + optional context hint in one column).
+# api.schemas.CreateInvestigationBody MUST reject newlines — they'd smuggle a fake hint here.
 
 from dataclasses import dataclass
 

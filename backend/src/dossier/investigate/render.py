@@ -1,17 +1,11 @@
-"""Brief markdown rendering."""
 from __future__ import annotations
 
 from dossier.investigate.brief_schema import Brief, BriefClaim, section_headings
 
 
 def brief_to_markdown(brief: Brief, url_by_chunk: dict[str, str]) -> str:
-    """Render a Brief as markdown with `([source](url))` citations.
-
-    `url_by_chunk` should cover every chunk in the investigation's corpus,
-    not only the top-k passed to the synthesizer — the grounder may pin a
-    claim to a chunk outside the top-k. Unknown chunk_ids render as
-    `(source)` without a link rather than dropping the citation.
-    """
+    # url_by_chunk should cover the WHOLE corpus, not just top-k —
+    # the grounder may pin to a chunk outside the synthesizer's window.
     out: list[str] = []
     for heading, field in section_headings():
         out.append(f"## {heading}\n")

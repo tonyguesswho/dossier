@@ -1,20 +1,3 @@
-"""Chunk + embed + insert.
-
-Takes ToolResults and writes:
-  - one `sources` row per result (deduped by content_hash within an investigation)
-  - many `source_chunks` rows per source (800 tokens / 120 overlap)
-
-Two non-obvious choices worth knowing:
-
-1. Splitter is RecursiveCharacterTextSplitter.from_tiktoken_encoder with
-   `cl100k_base`. cl100k is what text-embedding-3-small uses, AND it ships
-   bundled with tiktoken. The default `gpt2` encoder triggers a network
-   download on first call and breaks in offline/sandboxed envs.
-
-2. source_chunks.metadata stamps `embedding_model`. If we ever switch
-   embedding models, a backfill script needs to know which embedding
-   produced which row.
-"""
 from __future__ import annotations
 
 import hashlib
@@ -33,10 +16,11 @@ from dossier.investigate.tools.types import ToolResult
 
 logger = logging.getLogger(__name__)
 
-# 800/120 in TOKENS, not chars. Char-based 800 splits mid-sentence on long paragraphs.
+# Tokens, not chars. Char-based 800 splits mid-sentence on long paragraphs.
 CHUNK_SIZE_TOKENS: int = 800
 CHUNK_OVERLAP_TOKENS: int = 120
 
+# cl100k_base ships bundled with tiktoken; the default `gpt2` triggers a network download on first call.
 _TIKTOKEN_ENCODING: str = "cl100k_base"
 
 
@@ -68,12 +52,6 @@ def _build_splitter():
 
 
 def _chunk_text(full_text: str) -> list[ChunkSpan]:
-    """Token-bounded chunks with char_start/char_end offsets in the source text.
-
-    The splitter returns substrings; we locate each in the original to record
-    char offsets. Overlapping chunks share characters — fine, each chunk's
-    offsets independently support quoting.
-    """
     if not full_text or not full_text.strip():
         return []
     splitter = _build_splitter()
@@ -102,7 +80,6 @@ def _chunk_text(full_text: str) -> list[ChunkSpan]:
 
 
 def _embed_chunks(chunk_texts: list[str]) -> list[list[float]]:
-    """Embeddings batched at DEFAULT_EMBED_BATCH_SIZE inside the helper."""
     return embed(chunk_texts)
 
 
@@ -111,7 +88,6 @@ def _sha256(text_value: str) -> str:
 
 
 def _vector_literal(vec: list[float]) -> str:
-    """Format a list[float] as pgvector's `[x,y,z]` literal."""
     return "[" + ",".join(f"{v:.7f}" for v in vec) + "]"
 
 
@@ -121,11 +97,6 @@ def ingest_tool_results(
     *,
     engine: Engine | None = None,
 ) -> IngestStats:
-    """Insert one sources row + N source_chunks per ToolResult.
-
-    Empty-text results skipped. Duplicates (same investigation, same content_hash)
-    skipped via ON CONFLICT.
-    """
     stats = IngestStats()
     if not results:
         return stats
@@ -191,6 +162,8 @@ def ingest_tool_results(
                 )
 
             for chunk, embedding in zip(chunks, embeddings, strict=True):
+                # source_chunks.metadata stamps embedding_model so a future model swap
+                # has a backfill marker for which embedding produced which row.
                 conn.execute(
                     text(
                         """

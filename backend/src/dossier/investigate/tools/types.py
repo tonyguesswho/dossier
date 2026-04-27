@@ -1,10 +1,5 @@
-"""ToolResult contract — uniform shape across Exa, GitHub, Firecrawl, NewsAPI,
-Crunchbase, and pitch-deck ingestion. Every tool returns list[ToolResult].
-
-source_kind values must match the sources.source_kind CHECK constraint
-(set in migration 0001).
-"""
 from __future__ import annotations
+# source_kind values must match the sources.source_kind CHECK constraint (migration 0001).
 
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional

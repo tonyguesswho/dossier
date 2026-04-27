@@ -1,5 +1,5 @@
-"""GET /healthz — liveness probe. Intentionally public; no DB ping."""
 from __future__ import annotations
+# /healthz is intentionally public; no DB ping.
 
 from fastapi import APIRouter
 

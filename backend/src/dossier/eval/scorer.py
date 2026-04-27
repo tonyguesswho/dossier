@@ -1,11 +1,3 @@
-"""Deterministic citation-precision scorer.
-
-Pure function: no DB, no LLM, no network. Every quoted_span is normalized
-and tested as a substring of the cited chunk's text.
-
-Normalization comes from `dossier.core.text_normalize` — same module
-grounding calls into, so eval-time and grounding-time scores can't drift.
-"""
 from __future__ import annotations
 
 import logging
@@ -17,10 +9,6 @@ logger = logging.getLogger(__name__)
 
 
 def citation_precision(claims: list[Claim], corpus: dict[str, str]) -> float:
-    """Fraction of claims whose quoted_span appears (normalized) in its
-    cited chunk. Empty claims list returns 1.0 with a warning — most likely
-    an upstream bug where the synthesizer produced no rows.
-    """
     if not claims:
         logger.warning(
             "citation_precision: 0 claims — returning 1.0 (vacuously perfect)"

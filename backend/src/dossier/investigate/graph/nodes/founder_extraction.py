@@ -1,20 +1,3 @@
-"""Founder-name extraction — Haiku 4.5 with structured output.
-
-One cheap LLM call between Stage-1 (Exa/NewsAPI/Firecrawl) and Stage-2
-(GitHub-per-founder + Crunchbase). Returns up to 5 founder names to feed
-the Stage-2 fan-out.
-
-Searching GitHub for the literal company name returns useless noise — real
-founder names are required for any founder-claim fact-check to work, and
-those names aren't in graph state (only URLs and source_kinds are).
-
-Fail-open: any error returns []. stage2_router then fans out to Crunchbase
-only. Fabricated founder names are strictly worse than missing ones — they
-poison Stage-2 GitHub queries with garbage and end up cited in the brief.
-
-Prompt context is URLs only — raw chunk text doesn't live in state. The
-model uses URLs + general knowledge.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -68,11 +51,7 @@ def _format_hint(context_hint: str | None) -> str:
 
 
 async def run(state: DossierState, *, client: Any | None = None) -> dict:
-    """Extract up to 5 founder names from Stage-1 results.
-
-    Returns {"founder_candidates": [...]} with at most 5 entries, or [] on any
-    error. `client` is for test injection.
-    """
+    # Fail-open: fabricated founder names poison Stage-2 GitHub queries — empty list is better.
     company = state["company"]
     retrieved = state.get("retrieved_chunks", [])
     context_hint = state.get("context_hint")
@@ -121,7 +100,6 @@ async def run(state: DossierState, *, client: Any | None = None) -> dict:
         )
         return append_founder_candidates([])
 
-    # Cap at 5 here; stage2_router caps again as belt-and-suspenders.
     names: list[str] = []
     for candidate in parsed.founders[:5]:
         name = (candidate.name or "").strip()

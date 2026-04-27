@@ -1,13 +1,4 @@
-"""The Dossier evaluation set — single source of truth for the eval split.
-
-10 companies from YC W25 Demo Day, 6 train / 4 holdout. Holdout metrics are
-the honest measurement and must NEVER be used to tune prompts or thresholds.
-3 of the 6 train companies have hand-authored gold briefs (used for
-brief_similarity); the other 3 contribute to citation_precision and
-hallucination_rate only.
-
-Source: YC W25 Demo Day, TechCrunch coverage 2025-03-13.
-"""
+# Eval set: 10 companies, 6 train / 4 holdout. Holdout NEVER tunes prompts or thresholds.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,11 +6,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class EvalCompany:
-    """One row in the eval set.
-
-    `gold_filename` is relative to backend/eval/golds/ — None for ungolded companies.
-    """
-
+    # gold_filename is relative to backend/eval/golds/; None = ungolded.
     company_name: str
     seed_url: str
     vertical: str
@@ -28,12 +15,9 @@ class EvalCompany:
     gold_filename: str | None = None
 
 
-# Locked 2026-04-22. Any change here requires an explicit commit with rationale.
 # Order is stable so seed idempotency works (re-running seed.py changes no rows).
 EVAL_COMPANIES: tuple[EvalCompany, ...] = (
-    # ------------------------------------------------------------------
-    # Train set (6) — 3 golded, 3 gold headroom
-    # ------------------------------------------------------------------
+    # Train (6) — 3 golded, 3 ungolded
     EvalCompany(
         company_name="Abundant",
         seed_url="https://abundant.ai",
@@ -99,9 +83,7 @@ EVAL_COMPANIES: tuple[EvalCompany, ...] = (
             "Gold headroom: train-set, ungolded."
         ),
     ),
-    # ------------------------------------------------------------------
-    # Holdout set (4) — never used for tuning; Phase 4 reports honest metrics here
-    # ------------------------------------------------------------------
+    # Holdout (4) — never tuned against
     EvalCompany(
         company_name="GradeWiz",
         seed_url="https://gradewiz.ai",
@@ -142,7 +124,6 @@ EVAL_COMPANIES: tuple[EvalCompany, ...] = (
 
 
 def split_summary() -> dict[str, int]:
-    """Post-hoc sanity check — a test imports this and asserts the numbers match CONTEXT.md."""
     total = len(EVAL_COMPANIES)
     holdout = sum(1 for c in EVAL_COMPANIES if c.holdout)
     golded = sum(1 for c in EVAL_COMPANIES if c.gold_filename is not None)

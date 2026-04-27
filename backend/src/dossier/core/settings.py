@@ -1,9 +1,3 @@
-"""Runtime configuration via pydantic-settings.
-
-Required fields (no default) raise ValidationError if missing at process
-start. Optional fields have explicit defaults that match the existing
-fail-open behaviour of the tools that consume them.
-"""
 from __future__ import annotations
 
 import os
@@ -25,22 +19,17 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # --- Database --------------------------------------------------------
     database_url: str = Field(...)
 
-    # --- LLM providers --------------------------------------------------
     openrouter_api_key: SecretStr = Field(...)
-    # Embeddings call api.openai.com directly because OpenRouter doesn't
-    # proxy /v1/embeddings.
+    # Embeddings call api.openai.com directly — OpenRouter doesn't proxy /v1/embeddings.
     openai_api_key: SecretStr = Field(...)
 
-    # --- Observability --------------------------------------------------
-    # Langfuse keys are optional — missing keys downgrade tracing to a no-op.
+    # Missing Langfuse keys downgrade tracing to a no-op.
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
 
-    # --- Tools ----------------------------------------------------------
     exa_api_key: SecretStr = Field(...)
     firecrawl_api_key: SecretStr = Field(...)
     # GitHub falls back to unauthenticated (60 req/hr) when unset.
@@ -49,13 +38,11 @@ class Settings(BaseSettings):
     newsapi_api_key: str = ""
     crunchbase_api_key: str = ""
 
-    # --- Auth and dispatch ---------------------------------------------
     clerk_jwks_url: str = ""
     dossier_auth_dev_bypass: str = ""
     dispatch_mode: Literal["local", "lambda"] = Field(
         default="local", alias="DOSSIER_DISPATCH_MODE"
     )
-    # Set by Terraform when dispatch_mode='lambda'.
     lambda_function_name: str = ""
 
     @field_validator("database_url")
@@ -69,7 +56,6 @@ class Settings(BaseSettings):
 
     @property
     def database_url_libpq(self) -> str:
-        """`postgresql://` form, stripped of the SQLAlchemy `+psycopg` tag."""
         if self.database_url.startswith("postgresql+psycopg://"):
             return "postgresql://" + self.database_url[len("postgresql+psycopg://"):]
         return self.database_url
@@ -80,12 +66,10 @@ class Settings(BaseSettings):
 
     @property
     def is_lambda_runtime(self) -> bool:
-        """True when AWS injects AWS_LAMBDA_FUNCTION_NAME at runtime."""
         return bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))
 
 
 def get_settings() -> Settings:
-    """Fresh Settings instance per call. ~100µs; not cached."""
     return Settings()  # type: ignore[call-arg]
 
 

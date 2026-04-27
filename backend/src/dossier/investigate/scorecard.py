@@ -1,12 +1,3 @@
-"""Citation precision + grounding rate over an investigation's claims.
-
-Pure function over the rows the repository returns. Lives outside the
-routes module because the same computation is reachable from CLI eval
-reports and (eventually) a Langfuse score callback.
-
-grounded_span_start/end on the row are SOURCE-absolute; chunk_text is
-chunk-local — translate via chunk_char_start before slicing.
-"""
 from __future__ import annotations
 
 from typing import Iterable
@@ -15,11 +6,9 @@ from dossier.core.text_normalize import normalize
 
 
 def compute_scorecard(rows: Iterable) -> dict | None:
-    """Return scorecard dict, or None when there are no claims to score.
-
-    Output keys match `dossier.api.schemas.ScorecardResponse` field names so
-    the route can splat directly: `ScorecardResponse(**result)`.
-    """
+    # Output keys match dossier.api.schemas.ScorecardResponse so the route can splat directly.
+    # grounded_span_start/end on the row are SOURCE-absolute; chunk_text is chunk-local —
+    # translate via chunk_char_start before slicing.
     rows = list(rows)
     if not rows:
         return None

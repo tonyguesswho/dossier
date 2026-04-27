@@ -1,21 +1,3 @@
-"""investigate-lambda handler — runs the investigation graph.
-
-Same module is importable for local dispatch (`DOSSIER_DISPATCH_MODE=local`).
-
-Two non-obvious bits worth knowing:
-
-1. Refuses to start if `DOSSIER_AUTH_DEV_BYPASS` is set inside a deployed
-   Lambda — that env var disables auth and must never reach prod.
-2. AsyncPostgresSaver pool runs with `prepare_threshold=0` and `autocommit=True`.
-   prepare_threshold=0 stops psycopg3 from registering prepared statements,
-   which would otherwise pin connections inside RDS Proxy and exhaust the
-   t3.micro's ~85-connection cap. autocommit=True is required by .setup().
-
-Lambda flush: every exit path calls flush_and_shutdown(lambda_sleep=True).
-The 15s sleep is the documented Langfuse drain window — without it ~30% of
-traces are lost when Lambda freezes the container before the SDK's
-background HTTP sender finishes.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -25,8 +7,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Module-level so warm Lambda invocations reuse the pool + checkpointer.
+# _event_loop is also cached: asyncio.run() destroys its loop after each call,
+# which invalidates the asyncio.Lock objects inside AsyncConnectionPool and causes
+# "bound to a different event loop" on the second warm invocation.
 _pool: Any = None
 _checkpointer: Any = None
+_event_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _get_event_loop() -> asyncio.AbstractEventLoop:
+    """Return a persistent event loop, creating one if the current one is closed."""
+    global _event_loop, _pool, _checkpointer
+    if _event_loop is None or _event_loop.is_closed():
+        _event_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_event_loop)
+        # The pool/checkpointer were bound to the old loop — must re-initialise.
+        _pool = None
+        _checkpointer = None
+    return _event_loop
 
 
 def _check_security_invariants() -> None:
@@ -42,8 +40,7 @@ def _check_security_invariants() -> None:
 async def _get_checkpointer() -> Any:
     global _pool, _checkpointer
 
-    # Deferred so the api-lambda image (which doesn't bundle psycopg_pool)
-    # can still import this module.
+    # Deferred so the api-lambda image (no psycopg_pool) can still import this module.
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from psycopg_pool import AsyncConnectionPool
 
@@ -52,7 +49,7 @@ async def _get_checkpointer() -> Any:
 
         _pool = AsyncConnectionPool(
             conninfo=get_settings().database_url_libpq,
-            min_size=0,  # psycopg_pool >=3.2 defaults to 4; pin ≤ max_size or init raises
+            min_size=0,  # psycopg_pool >=3.2 defaults to 4; must be ≤ max_size
             max_size=2,
             kwargs={
                 "autocommit": True,       # required by AsyncPostgresSaver.setup()
@@ -62,14 +59,13 @@ async def _get_checkpointer() -> Any:
         )
         await _pool.open()
         _checkpointer = AsyncPostgresSaver(_pool)
-        await _checkpointer.setup()  # idempotent
+        await _checkpointer.setup()
         logger.info("runner: AsyncPostgresSaver pool initialized")
 
     return _checkpointer
 
 
 async def run_graph(investigation_id: str) -> None:
-    """Run the investigation graph. Resumes from checkpoint if interrupted."""
     from dossier.core.db import get_async_session
     from dossier.investigate import repository as repo
     from dossier.investigate.graph import build_graph
@@ -113,9 +109,7 @@ async def run_graph(investigation_id: str) -> None:
         "metadata": {"langfuse_session_id": str(investigation_id)},
     }
 
-    # ainvoke semantics: dict input → re-run from START; None → continue from
-    # the last checkpoint. An interrupted thread has non-empty `next` and a
-    # non-None created_at — that's how we tell resume from cold start.
+    # Resume detection: interrupted threads have non-empty `next` AND non-None created_at.
     existing_state = await graph.aget_state(config)
     is_resume = bool(existing_state.next) and existing_state.created_at is not None
 
@@ -147,7 +141,7 @@ async def run_graph(investigation_id: str) -> None:
         logger.info("runner: graph completed for investigation_id=%s", investigation_id)
     except Exception:
         logger.exception("runner: graph failed for investigation_id=%s", investigation_id)
-        # Fresh session — earlier one may be in an aborted-transaction state.
+        # Fresh session — the earlier one may be in an aborted-transaction state.
         try:
             async with get_async_session() as session:
                 async with session.begin():
@@ -162,8 +156,22 @@ async def run_graph(investigation_id: str) -> None:
             flush_and_shutdown(langfuse_client, lambda_sleep=True)
 
 
+def run_graph_sync(investigation_id: str) -> None:
+    """Synchronous wrapper safe to call from BackgroundTask threads and Lambda handler."""
+    loop = _get_event_loop()
+    if loop.is_running():
+        # Called from a worker thread while the loop runs on the main thread (e.g.,
+        # Starlette BackgroundTask via anyio). run_until_complete() raises "already running".
+        # run_coroutine_threadsafe schedules the coroutine on the live loop and blocks
+        # this thread until done — anyio yields control back so the loop can process it.
+        future = asyncio.run_coroutine_threadsafe(run_graph(investigation_id), loop)
+        future.result()
+    else:
+        loop.run_until_complete(run_graph(investigation_id))
+
+
 def handler(event: dict, context: Any) -> dict:
-    """AWS Lambda entry point. Event: {"investigation_id": "<uuid>"}."""
+    # AWS Lambda entry. Event: {"investigation_id": "<uuid>"}.
     _check_security_invariants()
 
     investigation_id = event.get("investigation_id")
@@ -171,7 +179,7 @@ def handler(event: dict, context: Any) -> dict:
         logger.error("runner.handler: missing investigation_id in event")
         return {"statusCode": 400, "body": "missing investigation_id"}
 
-    asyncio.run(run_graph(str(investigation_id)))
+    _get_event_loop().run_until_complete(run_graph(str(investigation_id)))
     return {"statusCode": 200, "body": "ok"}
 
 

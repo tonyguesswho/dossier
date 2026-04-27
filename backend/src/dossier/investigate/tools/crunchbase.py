@@ -1,11 +1,5 @@
-"""Crunchbase free-tier wrapper — basic org metadata via autocomplete + entity.
-
-Optional enrichment. Aggressive undocumented rate limits on the free tier
-make tenacity retries counterproductive (each 429 burns quota), so this is
-single-attempt fail-open. CRUNCHBASE_API_KEY is optional; without it we hit
-the public autocomplete endpoint at low QPS.
-"""
 from __future__ import annotations
+# Single-attempt fail-open: free-tier 429s burn quota, retries hurt more than help.
 
 import logging
 from datetime import datetime, timezone
@@ -23,7 +17,6 @@ _CRUNCHBASE_AUTOCOMPLETE = "https://autocomplete.crunchbase.com/v4/autocomplete"
 async def _fetch_org_summary(
     company: str, api_key: str | None
 ) -> dict[str, Any] | None:
-    """autocomplete → org entity. Returns properties dict or None."""
     import httpx  # noqa: PLC0415 — deferred for monkeypatch safety
 
     ac_params: dict[str, Any] = {
@@ -67,7 +60,6 @@ async def _fetch_org_summary(
 
 
 async def search(company: str) -> list[ToolResult]:
-    """Fetch a basic Crunchbase org profile. Returns [] on any failure."""
     api_key = get_settings().crunchbase_api_key or None
 
     try:

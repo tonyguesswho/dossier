@@ -43,3 +43,6 @@ nohup.out
 
 # Claude Code local config
 .claude/
+.agents/
+skill-lock.json
+.gstack/

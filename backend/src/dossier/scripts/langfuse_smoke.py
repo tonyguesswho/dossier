@@ -1,10 +1,6 @@
 """Langfuse connectivity smoke test.
 
     cd backend && uv run python -m dossier.scripts.langfuse_smoke
-
-Opens one trace via the Langfuse 4.x observation API. Lambda callers pass
-lambda_sleep=True to flush_and_shutdown; for local scripts the 15s sleep
-isn't needed.
 """
 from __future__ import annotations
 
@@ -30,12 +26,9 @@ def main() -> int:
 
     client = get_langfuse_client(strict=True)
 
-    # propagate_attributes belongs to the langfuse package — import after
-    # get_langfuse_client to keep the env-before-import order intact.
+    # Import after get_langfuse_client so env-before-import order holds.
     from langfuse import propagate_attributes  # noqa: PLC0415
 
-    # 4.x: trace-level attributes via propagate_attributes (replaces 3.x's
-    # imperative client.update_current_trace).
     with propagate_attributes(
         tags=["smoke-test"],
         trace_name="dossier-smoke-test",

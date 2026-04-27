@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 #
 # Single Lambda container for Dossier.
 #

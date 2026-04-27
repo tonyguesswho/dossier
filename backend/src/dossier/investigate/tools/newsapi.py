@@ -1,10 +1,5 @@
-"""NewsAPI search wrapper for press mentions.
-
-Free tier is dev-only per NewsAPI ToS — production should swap for GDELT or
-Bing News. Fail-open: missing key, network error, or empty body all return [],
-keeping a missing secondary source from killing an investigation.
-"""
 from __future__ import annotations
+# Free tier is dev-only per NewsAPI ToS; production should swap for GDELT/Bing.
 
 import logging
 from datetime import datetime, timezone
@@ -45,7 +40,6 @@ async def _fetch_articles(query: str, api_key: str) -> list[dict]:
 
 
 async def search(company: str, context_hint: str | None = None) -> list[ToolResult]:
-    """Search NewsAPI for recent press mentions of `company`."""
     api_key = get_settings().newsapi_api_key
     if not api_key:
         logger.warning("newsapi.search: NEWSAPI_API_KEY not set — skipping")

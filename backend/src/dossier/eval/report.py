@@ -1,11 +1,6 @@
 """Citation-precision scorecard over completed investigations.
 
-    uv run python -m dossier.eval.report          # all
-    uv run python -m dossier.eval.report --limit 10
-    uv run python -m dossier.eval.report --json
-
-Lives in src/ rather than scripts/ because Phase 4's UI scorecard is a
-downstream caller — panelists can import it.
+    uv run python -m dossier.eval.report [--limit N] [--json]
 """
 from __future__ import annotations
 
@@ -43,13 +38,7 @@ def _fetch_complete_investigations(engine: Any, limit: int | None) -> list[dict]
 def _fetch_claims_and_corpus(
     engine: Any, investigation_id: str
 ) -> tuple[list[Claim], dict[str, str]]:
-    """quoted_span is derived from sc.text[start:end] when grounding succeeded.
-    Ungrounded claims (NULL grounded_source_chunk_id) get empty source_chunk_id
-    so citation_precision scores them 0.
-
-    grounded_span_start/end are SOURCE-absolute; sc.text is the chunk-local
-    substring. Translate via chunk_char_start before slicing.
-    """
+    # grounded_span_start/end are SOURCE-absolute; sc.text is chunk-local. Translate via chunk_char_start.
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -106,10 +95,8 @@ def build_report(limit: int | None) -> dict:
         claims, corpus = _fetch_claims_and_corpus(engine, inv["id"])
         grounded_claims = [c for c in claims if c.source_chunk_id]
         grounded = len(grounded_claims)
-        # Pessimistic full-funnel view (ungrounded count as 0).
+        # precision_grounded should be ~1.0 — anything lower is a grounder offset bug.
         precision_all = citation_precision(claims, corpus) if claims else 0.0
-        # Should be ~1.0 if the grounder stores offsets correctly. Lower means
-        # there's a grounder bug.
         precision_grounded = (
             citation_precision(grounded_claims, corpus) if grounded_claims else 0.0
         )

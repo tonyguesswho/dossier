@@ -1,8 +1,3 @@
-"""Pydantic request/response bodies for the investigations API.
-
-FastAPI auto-validates request bodies against these classes; malformed input
-returns 422 without entering the route handler.
-"""
 from __future__ import annotations
 
 import re
@@ -14,9 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-# Defense-in-depth substring rejection. Real defenses are parameterized SQL
-# and the retrieved-content sandbox; these just stop the obvious payloads
-# at the front door so they never get logged or stored.
+# Front-door denylist. Defense in depth — real defenses are parameterized SQL + the sandbox.
 _REJECT_SUBSTRINGS: tuple[str, ...] = (
     "\x00",
     "`",
@@ -64,8 +57,7 @@ class CreateInvestigationBody(BaseModel):
     @classmethod
     def _check_value(cls, v: str) -> str:
         _check_injection_patterns(v)
-        # Guards the InvestigationInput encoding (see investigate.input_ref):
-        # a newline in the user value could smuggle a fake hint separator.
+        # Newlines could smuggle a fake hint separator into InvestigationInput encoding.
         if "\n" in v or "\r" in v:
             raise ValueError("guardrail_rejected")
         return v
@@ -93,7 +85,7 @@ class CreateInvestigationResponse(BaseModel):
 
 
 class ReRunResponse(CreateInvestigationResponse):
-    """Re-run returns the id of the NEW investigation (same shape as create)."""
+    pass
 
 
 class RenameInvestigationBody(BaseModel):
@@ -142,12 +134,7 @@ class InvestigationListResponse(BaseModel):
 
 
 class ScorecardResponse(BaseModel):
-    """Eval scorecard surfaced on the brief.
-
-    citation_precision: share of grounded claims whose quoted_span verifies
-    by ctrl-F against the cited chunk. 1.0 = every citation is a real quote.
-    grounding_rate: share of synthesizer claims the grounder accepted.
-    """
+    """Eval scorecard surfaced on the brief."""
     model_config = ConfigDict(from_attributes=True)
     citation_precision: float
     grounding_rate: float
@@ -188,8 +175,7 @@ class ChatTurnBody(BaseModel):
     @field_validator("question")
     @classmethod
     def _check(cls, v: str) -> str:
-        # Same denylist as CreateInvestigationBody — chat questions also
-        # flow to the synthesizer, so block obvious injection attempts here.
+        # Chat questions reach the synthesizer too — same denylist as the create body.
         _check_injection_patterns(v)
         return v
 

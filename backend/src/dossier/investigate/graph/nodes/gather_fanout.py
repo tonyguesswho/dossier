@@ -1,22 +1,3 @@
-"""Two-stage fan-out via langgraph.types.Send.
-
-Stage 1: Exa + NewsAPI + Firecrawl (when input_url is present).
-After Stage 1: Haiku founder extraction.
-Stage 2: GitHub-per-founder + Crunchbase.
-
-NewsAPI + Crunchbase wrappers are native async. Exa + GitHub + Firecrawl
-are sync — wrapped via asyncio.to_thread so the graph stays non-blocking.
-Tool nodes fail-open: any error logs and returns no chunks.
-
-Raw source text never enters graph state. Tool nodes register ToolResult
-objects in a module-level cache (ingest_and_embed drains it); state only
-carries chunk references.
-
-Every tool node is the same shape: invoke, fail-open with `[]`, cache
-results, build chunk refs, append to state. `_run_tool_node` is that
-template — each node function below is the per-tool *specification*
-(label, section hint, invocation) without re-stating the envelope.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -45,9 +26,7 @@ def _cache_results(investigation_id: str, results: list[ToolResult]) -> None:
 def _tool_results_to_chunk_refs(
     results: list[ToolResult], section_hint: str = "general"
 ) -> list[RetrievedChunkRef]:
-    """Build chunk refs without text. ingest_and_embed fills real ids/offsets
-    after the DB insert; char_end=len(text) here is just a payload-size hint.
-    """
+    # Refs without text — ingest_and_embed fills real chunk ids/offsets after the DB insert.
     refs: list[RetrievedChunkRef] = []
     for r in results:
         refs.append(
@@ -71,12 +50,7 @@ async def _run_tool_node(
     section_hint: str,
     invoke: Callable[[], Awaitable[list[ToolResult]]],
 ) -> dict:
-    """Standard tool-node envelope: invoke, fail-open, cache, build refs, append.
-
-    `invoke` is a zero-arg coroutine factory so the per-tool argument-prep
-    stays at the call site. Any exception is logged + swallowed; the run
-    continues with the chunks other tools produced.
-    """
+    # Fail-open envelope shared by every tool node.
     try:
         results = await invoke()
     except Exception:  # noqa: BLE001 — fail-open is the contract
@@ -89,15 +63,12 @@ async def _run_tool_node(
 
 
 async def run(state: DossierState) -> dict:
-    """Orchestration node — no state updates."""
     logger.info("gather_fanout: routing stage1 for company=%s", state["company"])
     return {}
 
 
 def stage1_router(state: DossierState) -> list[Send]:
-    """Exa + NewsAPI (+ Firecrawl if input_url). Deck-input investigations
-    skip web tools — the deck text is already the corpus.
-    """
+    # Deck-input investigations skip web tools — the deck text is already the corpus.
     if state.get("input_type") == "deck":
         logger.info("gather_fanout: skipping stage1 for deck-input investigation")
         return []
@@ -153,7 +124,6 @@ async def run_newsapi(state: DossierState) -> dict:
 
 
 async def run_firecrawl(state: DossierState) -> dict:
-    """Firecrawl deep-crawl, only when input_url is set."""
     input_url = state.get("input_url")
     if not input_url:
         return append_retrieved_chunks([])
@@ -172,7 +142,6 @@ async def run_firecrawl(state: DossierState) -> dict:
 
 
 async def run_github_founder(state: DossierState) -> dict:
-    """Per-founder GitHub search; current_founder injected by stage2_router."""
     founder = state.get("current_founder", "")
     if not founder:
         return append_retrieved_chunks([])

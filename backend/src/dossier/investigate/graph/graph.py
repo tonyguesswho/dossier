@@ -1,16 +1,3 @@
-"""Investigation graph factory.
-
-Topology:
-    START → planner → gather_fanout
-        Stage 1 fan-out: exa_search ‖ newsapi_search ‖ firecrawl_crawl
-        ↓ converge
-    founder_extraction
-        Stage 2 fan-out: github_founder×N ‖ crunchbase_search
-        ↓ converge
-    ingest_and_embed → verifier
-    verifier → gather_fanout (regather) | synthesizer
-    synthesizer → finalize → END
-"""
 from __future__ import annotations
 
 from langgraph.graph import END, START, StateGraph
@@ -28,7 +15,6 @@ from .state import DossierState
 
 
 def build_graph(checkpointer=None):
-    """Compile the investigation StateGraph. Pass None for checkpointer in tests."""
     builder = StateGraph(DossierState)
 
     builder.add_node("planner", planner.run)

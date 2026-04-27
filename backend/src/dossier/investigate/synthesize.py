@@ -1,17 +1,3 @@
-"""Single-pass brief synthesizer — retrieved chunks → Pydantic-validated Brief.
-
-One LLM call per investigation. Output is validated via openai's structured
-outputs (`response_format=Brief`).
-
-Retrieved content is wrapped in <retrieved_content> tags and the system prompt
-declares anything inside those tags untrusted data, never instructions. This
-is the front-line defense; the per-chunk Haiku injection classifier at ingest
-time is the second line.
-
-Fail-fast: refusal, parsed=None, or any SDK exception raises PipelineError.
-The caller marks the investigation failed. Salvaging a half-parsed brief is
-worse than no brief — citations are the whole product.
-"""
 from __future__ import annotations
 
 import logging
@@ -101,7 +87,7 @@ def synthesize_brief(
     *,
     client: Any | None = None,
 ) -> Brief:
-    """Single-pass synthesizer. Raises PipelineError on refusal / parsed=None."""
+    # Fail-fast on refusal/parsed=None — half-parsed Brief is worse than none.
     user_prompt = USER_PROMPT_TEMPLATE.format(
         company=company,
         context_hint_block=_format_context_hint(context_hint),

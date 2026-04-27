@@ -1,24 +1,3 @@
-"""Ingest & embed — chunk, classify for prompt injection, persist clean
-chunks, quarantine injection chunks.
-
-Pipeline order matters here: classifier LLM calls run BEFORE any DB session
-opens. RDS Proxy pins a connection whenever a session holds state during an
-outbound network call, which would exhaust the t3.micro pool under any real
-concurrency. Order:
-
-    drain cache → chunk in memory → classify in parallel → open one DB
-    session for the bulk write → clear cache.
-
-Classifier wraps each chunk in <retrieved_content> tags so the judge model
-treats it as untrusted data. Fail-open: any LLM error returns ('clean', _)
-— a missed injection is bad, a stalled investigation is worse.
-
-Why a module-level cache instead of carrying ToolResult text through state:
-graph state must not carry raw source text (bloats checkpoint rows; leaks
-into trace logging). The cache lives outside state, populated by the
-gather_fanout tool nodes and drained here. investigate-lambda is single-
-invocation per container, so cross-investigation contamination is impossible.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -96,15 +75,9 @@ def _drain_cache(investigation_id: str) -> list[ToolResult]:
 
 
 async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tuple[str, str]:
-    """Haiku injection classifier. Returns ('clean'|'injection', reason).
-
-    Fail-open: any error path returns ('clean', _). Run OUTSIDE any DB session
-    because RDS Proxy pins connections that hold state across network calls.
-
-    Do not truncate `chunk_text` — chunks are already ~800 tokens by
-    construction; capping further reintroduces a second-half-escape gap
-    where injections past the cap never reach the judge.
-    """
+    # Fail-open on any error — a missed injection is bad, a stalled investigation is worse.
+    # MUST run outside a DB session: RDS Proxy pins connections that hold state across network calls.
+    # Do NOT truncate chunk_text — capping reintroduces a second-half escape gap.
     from dossier.core.llm import structured_call_with_status
 
     def _parse_sync() -> _ClassifierVerdict | tuple[str, str]:
@@ -147,12 +120,7 @@ async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tupl
 
 
 async def run(state: DossierState) -> dict:
-    """Chunk → classify (no DB) → bulk write (single DB session) → clear cache.
-
-    Returns {} — synthesizer/finalize query pgvector by investigation_id and
-    don't dereference chunk_ids from state, so backfilling chunk_id refs would
-    cost a SELECT with no consumer.
-    """
+    # Chunk → classify (no DB) → bulk write (single DB session) → clear cache.
     from dossier.core.db import get_async_session
     from dossier.investigate.ingest import _chunk_text, ingest_tool_results
 
@@ -213,8 +181,7 @@ async def run(state: DossierState) -> dict:
         else:
             clean_urls.add(result.url)
 
-    # A source is clean iff none of its chunks were flagged. One injection
-    # quarantines the whole source.
+    # One flagged chunk quarantines the whole source.
     clean_tool_results: list[ToolResult] = [
         result
         for result in results_to_ingest
@@ -230,9 +197,6 @@ async def run(state: DossierState) -> dict:
         investigation_id_str,
     )
 
-    # Hand the clean path to the sync ingest function — it already does
-    # chunk + embed + insert in one transaction. Sync engine talks through
-    # the same RDS Proxy with prepare_threshold=0 wired in core/db.
     if clean_tool_results:
         await asyncio.to_thread(
             ingest_tool_results, investigation_uuid, clean_tool_results

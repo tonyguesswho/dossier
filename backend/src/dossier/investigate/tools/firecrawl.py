@@ -1,14 +1,5 @@
-"""Firecrawl wrapper for deep-crawling a seed URL when Exa excerpts are thin.
-
-Budget: ≤1 crawl per investigation — 500 free credits/mo has to stretch
-across dev, eval reruns, and the demo. The wrapper enforces the budget;
-when to invoke is the caller's call.
-
-firecrawl-py 4.x exposes `app.scrape(url, formats=[...], timeout=ms)` returning
-a Document with `.markdown` and `.metadata.title`. Older SDKs and test doubles
-hand back a dict — we accept both shapes.
-"""
 from __future__ import annotations
+# ≤1 crawl per investigation — 500 free credits/mo across dev + eval + demo.
 
 import logging
 from typing import Any
@@ -68,11 +59,6 @@ def crawl_seed_url(
     investigation_id: str,
     _budget_tracker: dict[str, int] | None = None,
 ) -> list[ToolResult]:
-    """Crawl one URL; enforces ≤1 call per investigation_id.
-
-    Fail-open on budget exhaustion or crawl errors. Raises ValueError only
-    on non-http(s) URLs (a programmer error, not a runtime condition).
-    """
     _validate_url(url)
     tracker = _budget_tracker if _budget_tracker is not None else _BUDGET
 

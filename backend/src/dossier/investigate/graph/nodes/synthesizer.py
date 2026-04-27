@@ -1,12 +1,3 @@
-"""Synthesizer — top-k retrieve, call synthesize_brief, flatten to draft claims.
-
-Reuses the synchronous Phase-2 retrieve_top_k + synthesize_brief unchanged
-(via asyncio.to_thread). synthesize.py already implements the retrieved-content
-delimiter sandbox, so this node inherits injection-defense without extra wiring.
-
-Brief uses field names ('risk_flags'); state.section uses DB Literal values
-('risk'). FIELD_TO_DB from brief_schema does the translation.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -20,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 async def run(state: DossierState) -> dict:
-    """Returns {"draft_claims": [...]} — verifier inspects per-section coverage."""
     from dossier.core.db import get_async_session
     from dossier.investigate import repository as repo
     from dossier.investigate.brief_schema import FIELD_TO_DB
@@ -37,8 +27,7 @@ async def run(state: DossierState) -> dict:
         investigation_id_str,
     )
 
-    # k=20 gives the synthesizer broad context across sources without blowing
-    # the token budget. Lower k starves the per-section coverage check.
+    # k=20 — lower starves per-section coverage; higher blows the token budget.
     retrieved = await asyncio.to_thread(
         retrieve_top_k, investigation_uuid, company, k=20
     )
@@ -48,8 +37,7 @@ async def run(state: DossierState) -> dict:
             "synthesizer: 0 chunks retrieved — sections will be empty, verifier will re-gather",
         )
 
-    # synthesize_brief raises on refusal/parse failure; runner.py catches and
-    # marks the investigation failed (we want fail-fast on synthesis).
+    # Fail-fast on synthesis: synthesize_brief raises, runner marks the investigation failed.
     brief = await asyncio.to_thread(
         synthesize_brief, retrieved, company, context_hint
     )

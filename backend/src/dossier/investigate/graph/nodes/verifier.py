@@ -1,10 +1,5 @@
-"""Verifier — per-section empty-claim check; routes back to gather_fanout when
-any of the six sections has zero claims and reflection_count < 2.
-
-Reflection cap of 2 is non-negotiable — without it the loop can run forever
-when a section is genuinely unanswerable from public sources.
-"""
 from __future__ import annotations
+# Reflection cap of 2 — without it the loop runs forever on unanswerable sections.
 
 import logging
 
@@ -42,7 +37,7 @@ async def run(state: DossierState) -> dict:
 
 
 def route(state: DossierState) -> str:
-    """Conditional edge. Reflection cap takes priority over regather flag."""
+    # Cap takes priority over regather flag.
     if state.get("should_regather") and state.get("reflection_count", 0) < 2:
         return "gather_fanout"
     return "synthesizer"

@@ -1,4 +1,3 @@
-"""Planner — initialize targeted_sections to all six on first pass."""
 from __future__ import annotations
 
 import logging

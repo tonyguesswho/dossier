@@ -1,12 +1,3 @@
-"""Substring-match BriefClaims against retrieved chunks; INSERT into claims.
-
-Best-effort grounding: claims that don't substring-match are still persisted
-with grounded_source_chunk_id=NULL so the hallucination metric can count them.
-
-Normalization is shared with the eval scorer via
-`dossier.core.text_normalize` — both call the same function so eval-time
-and grounding-time scores can't drift.
-"""
 from __future__ import annotations
 
 import logging
@@ -35,10 +26,6 @@ class GroundStats(BaseModel):
 
 
 def _locate_span(chunk_text: str, quoted_span: str) -> tuple[int | None, int | None]:
-    """Best-effort char offsets — exact case first, then case-insensitive.
-    Returns (None, None) when neither match. The normalized comparison may
-    succeed where the raw locate doesn't (whitespace collapse).
-    """
     if not quoted_span:
         return None, None
     start = chunk_text.find(quoted_span)
@@ -56,16 +43,6 @@ def ground_claims(
     *,
     engine: Optional[Engine] = None,
 ) -> GroundStats:
-    """Ground each BriefClaim to a source chunk (or NULL) and persist.
-
-    Per claim:
-      missing chunk          → INSERT with NULL grounded_source_chunk_id
-      normalized quote in chunk → INSERT with chunk + source-absolute span
-      otherwise              → INSERT with NULL
-
-    All rows count toward claims_written so the hallucination metric is
-    computed against every claim the synthesizer emitted.
-    """
     stats = GroundStats()
     eng = engine if engine is not None else get_engine()
 
@@ -100,13 +77,10 @@ def ground_claims(
                             chunk.text, claim.quoted_span
                         )
                         if loc_start is not None and loc_end is not None:
-                            # Source-absolute = chunk's source offset + local match.
                             grounded_start = chunk.char_start + loc_start
                             grounded_end = chunk.char_start + loc_end
                         else:
-                            # Normalized match but raw locate failed (whitespace
-                            # drift) — fall back to the full chunk span so the UI
-                            # can still highlight something.
+                            # Normalized matched but raw locate failed (whitespace drift) — fall back to whole chunk.
                             grounded_start = chunk.char_start
                             grounded_end = chunk.char_end
                         stats.claims_grounded += 1

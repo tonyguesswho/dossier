@@ -1,269 +1,214 @@
 # Dossier
 
-**Cited-OSINT investigation agent for seed-stage VC first-meeting prep.**
-Paste a company name, URL, or pitch deck → 2-4 minutes later get a one-page
-brief with six sections (Founders, Company, Market, Product, Risk Flags,
-Suggested Questions) where **every claim links to a verbatim source span**.
-After the brief loads, a grounded chat pane lets you ask follow-ups that
-stay cited to the same corpus.
+**An AI investigation agent for VC first-meeting prep.**
 
-Live: **https://dossier-sage-omega.vercel.app** (backend on AWS Lambda,
-frontend on Vercel).
+Drop a company name, URL, or pitch deck → get a one-page cited brief in 2–4 minutes. Every factual claim links back to the exact sentence it came from. After the brief loads, a grounded chat pane lets you ask follow-up questions that stay cited to the same corpus.
+
+**Live demo → https://dossier-sage-omega.vercel.app**
+
+Built as a 14-day solo capstone. Backend on AWS Lambda, frontend on Vercel.
 
 ---
 
-## For reviewers — start here
+## The problem it solves
 
-If you are peer-reviewing Dossier, the fastest way to get oriented is this
-10-minute tour:
+Seed-stage VC partners spend 30–60 minutes Googling before every first meeting — pulling founder backgrounds, funding history, product positioning, and news. The output is a patchwork of browser tabs with no citations you can trust after the fact.
 
-1. **Read the core-value line above.** The project lives or dies on one
-   property: *every factual claim has a citation, and the citations verify*.
-   Everything else is in service of that.
-2. **[DECISIONS.md](./DECISIONS.md)** — 15 architectural choices with
-   rejected alternatives and rationale. This is where the heart of the
-   project is documented; it's also the easiest place to form a specific,
-   defensible critique.
-3. **Eval numbers (see `Citation precision` section below).** The harness
-   that scores the brief is `backend/src/dossier/eval/`. Run it:
-   ```bash
-   cd backend && uv run python -m dossier.eval.report
-   ```
-   Output is a table plus aggregate numbers — those are the demo scorecard.
-4. **Five files to anchor code-level feedback on:**
-   - [`backend/src/dossier/investigate/graph/graph.py`](./backend/src/dossier/investigate/graph/graph.py)
-     — the LangGraph topology (planner → gather_fanout → founder_extraction
-     → stage2_router → ingest_and_embed → verifier → synthesizer → finalize,
-     with reflection cap)
-   - [`backend/src/dossier/investigate/ground.py`](./backend/src/dossier/investigate/ground.py)
-     — substring-matching grounder; the "citations don't lie" mechanism
-   - [`backend/src/dossier/eval/scorer.py`](./backend/src/dossier/eval/scorer.py)
-     — deterministic `citation_precision()` used by the eval harness
-   - [`backend/src/dossier/investigate/graph/nodes/ingest_and_embed.py`](./backend/src/dossier/investigate/graph/nodes/ingest_and_embed.py)
-     — chunking + embedding + the Haiku injection classifier (quarantines
-     prompt-injection attempts per GUARD-02)
-   - [`infra/terraform/`](./infra/terraform/) — single-stack AWS deploy
-     (no VPC, no API Gateway, no RDS Proxy — see DECISIONS.md for why)
-5. **Known limitations** are in the `Known Limitations` section below.
-   These are open questions where specific peer feedback would land best.
+Dossier compresses that research into a structured one-pager where **every claim is anchored to a verbatim source span**. The brief can't contain a claim it can't prove. If the grounder can't find a matching substring in the source corpus, the claim is dropped rather than cited with a hallucinated URL.
 
 ---
 
-## Architecture at a glance
+## What makes it non-trivial
+
+Three things that separate this from a "call an LLM with search results" wrapper:
+
+**1. Deterministic grounding.** `ground.py` does a normalized substring match between each proposed claim's `quoted_span` and the source chunk text. No match → claim is silently dropped. The eval harness scores `citation_precision` over the accepted set — it's been 100% across every investigation run.
+
+**2. Eval harness.** A held-out set of 8 companies with a CLI scorer (`dossier.eval.report`). Grounding rate and precision are computed deterministically from the database — no LLM judge, no vibes.
+
+**3. LangGraph reflection loop.** After the synthesizer drafts the brief, a `verifier` node checks for missing sections and weak citations. If coverage is below threshold it routes back to the planner for a targeted re-gather. Capped at 2 reflections to bound cost.
+
+---
+
+## Eval numbers
+
+Run it yourself: `cd backend && uv run python -m dossier.eval.report`
+
+| Company | Claims | Grounded | Grounding rate | Precision (grounded) |
+|---|---|---|---|---|
+| paidhr | 34 | 28 | 82.4% | 100.0% |
+| Uber (deck) | 23 | 20 | 87.0% | 100.0% |
+| Buffer (deck) | 27 | 27 | 100.0% | 100.0% |
+| chowdeck | 32 | 28 | 87.5% | 100.0% |
+| andela.com | 31 | 25 | 80.6% | 100.0% |
+| x.com | 30 | 30 | 100.0% | 100.0% |
+| facebook | 35 | 19 | 54.3% | 100.0% |
+| linear | 22 | 17 | 77.3% | 100.0% |
+| **Aggregate** | **234** | **194** | **82.9%** | **100.0%** |
+
+**How to read this:** the synthesizer proposes ~30 claims per investigation. The grounder accepts ~83% on average. Of the accepted set, every quoted span is byte-identical to a substring of the cited source chunk. "Drop rather than fabricate" is the design posture.
+
+---
+
+## Architecture
 
 ```
-┌──────────────────┐    HTTPS    ┌──────────────────────────┐    HTTPS    ┌──────────────┐
-│  Next.js 16      │ ──────────▶ │ Vercel route handlers    │ ──────────▶ │ AWS Lambda   │
-│  (Vercel)        │             │ /api/* (Clerk JWT mint)  │             │ (FastAPI via │
-│  + Clerk auth    │ ◀────────── │                          │ ◀────────── │  Mangum)     │
-└──────────────────┘   JSON+SSE  └──────────────────────────┘   JSON+SSE  └──────┬───────┘
-                                                                                 │
-                                                                                 ▼
-                                                              ┌──────────────────────────────────────┐
-                                                              │  lambda_handler: event-shape dispatch │
-                                                              │                                        │
-                                                              │   HTTP event → Mangum → FastAPI routes │
-                                                              │                                        │
-                                                              │   {investigation_id: uuid}             │
-                                                              │   → runner.run_graph() → LangGraph     │
-                                                              └──────────┬───────────────────────────┘
-                                                                         │
-                        ┌────────────────────────────────────────────────┴────────────────────────┐
-                        │                              LangGraph                                  │
-                        │  planner ─▶ gather_fanout ─▶ founder_extraction ─▶ stage2_router        │
-                        │                                                         │               │
-                        │                                                         ▼               │
-                        │                  (ingest_and_embed) ◀── fan-in ── (per-founder GitHub)  │
-                        │                          │                                              │
-                        │                          ▼                                              │
-                        │                      verifier ──(reflect, cap 2)──┐                     │
-                        │                          │                        │                     │
-                        │                          ▼                        ▼                     │
-                        │                     synthesizer ───────▶ finalize (ground + persist)    │
-                        └─────────────┬──────────────┬──────────────────┬──────────────────────────┘
-                                      │              │                  │
-                                      ▼              ▼                  ▼
-                               ┌────────────┐ ┌────────────┐ ┌──────────────────┐
-                               │ RDS        │ │ Langfuse   │ │ OpenRouter       │
-                               │ Postgres + │ │ (per-node  │ │ (Sonnet / Haiku, │
-                               │ pgvector   │ │  spans +   │ │  stock openai    │
-                               │ + HNSW     │ │  traces)   │ │  SDK)            │
-                               └────────────┘ └────────────┘ └──────────────────┘
-                                                                      │
-                                                                      └─▶ OpenAI (embeddings only;
-                                                                          OpenRouter doesn't proxy
-                                                                          /v1/embeddings — see
-                                                                          DECISIONS.md #6)
-```
+Browser (Next.js 16 + Clerk)
+    │  polling / chat
+    ▼
+AWS Lambda (single container — FastAPI via Mangum)
+    │
+    ├── POST /investigations  →  insert row + self-invoke Lambda with {investigation_id}
+    │
+    └── {investigation_id} event  →  LangGraph runner
+            │
+            ├── planner             (Haiku: pick gather angles + targeted_sections)
+            ├── gather_fanout       (concurrent: Exa × 3, GitHub, Firecrawl, NewsAPI, Crunchbase)
+            ├── founder_extraction  (Haiku: extract names → Send per-founder GitHub lookup)
+            ├── ingest_and_embed    (chunk + embed + Haiku injection classifier → pgvector)
+            ├── verifier            (Haiku: coverage check → reflect or continue, cap 2)
+            ├── synthesizer         (Sonnet: draft 30 claims with quoted_spans)
+            └── finalize            (ground.py: substring-match filter → persist to RDS)
+                                     └── AsyncPostgresSaver checkpoint (RDS Postgres)
 
-**Tool layer (invoked inside `gather_fanout`):** Exa web search (3 angle-tagged
-queries — name, founders, funding) · GitHub founder-profile search · Firecrawl
-crawl (≤1 per investigation) · NewsAPI · Crunchbase. Every tool has fail-open
-behavior so one dead source never kills the investigation.
+Models:       Claude Sonnet 4.5 (synthesis) + Claude Haiku 4.5 (planner/verifier/classifier)
+Routing:      OpenRouter via stock openai SDK (base_url override)
+Embeddings:   text-embedding-3-small via OpenAI direct
+Observability: Langfuse — per-node spans, token counts, latency
+```
 
 ---
 
-## Citation precision (the headline metric)
+## Tech stack
 
-A brief is worthless if the citations are fabricated. Dossier's grounder
-(`ground.py`) refuses to emit a claim it can't verify against a verbatim
-source substring, so `brief.claims` is implicitly a *filtered* set of the
-synthesizer's output — claims without a verifiable quote get dropped rather
-than cited with a hallucinated URL.
+| Layer | Choice | Why |
+|---|---|---|
+| LLM routing | OpenRouter via stock `openai` SDK (`base_url` override) | Swap model with one env var; no per-provider SDK |
+| Agent framework | LangGraph 1.0 | Resumable checkpoints via `AsyncPostgresSaver`; `Send` for concurrent fan-out |
+| Models | Claude Sonnet 4.5 (synthesis) + Haiku 4.5 (planning/classification) | Cost/quality split — Haiku for structured extraction, Sonnet for prose |
+| Backend | FastAPI + Mangum on AWS Lambda (container image) | Single deploy unit; container needed for `poppler-utils` (PDF → text) |
+| Database | RDS Postgres + pgvector (HNSW index) | RAG retrieval + LangGraph checkpoint storage in one DB |
+| Search | Exa (primary) | Returns full source URLs + markdown; Tavily hides source spans so citations would be unverifiable |
+| Crawl | Firecrawl | Clean markdown from arbitrary URLs |
+| Observability | Langfuse 3.x | Per-node spans, token counts, latency — critical for a multi-node graph |
+| Frontend | Next.js 16 App Router + Clerk + TanStack Query | Auth + status polling without SSE infrastructure |
+| Infra | Terraform (ECR + Lambda Function URL + RDS) | Single flat stack, no API Gateway overhead |
 
-Scorecard over the 5 most recent investigations:
+Full rationale for every choice, plus the rejected alternatives: **[DECISIONS.md](./DECISIONS.md)**
 
-| Metric | Value |
+---
+
+## Key files
+
+| File | What it does |
 |---|---|
-| Total claims | 151 |
-| Grounded claims | 81 |
-| Grounding rate | 53.6% |
-| **Precision (over grounded subset)** | **100.0%** |
-| Precision (end-to-end funnel) | 53.6% |
+| [`backend/src/dossier/investigate/graph/graph.py`](./backend/src/dossier/investigate/graph/graph.py) | LangGraph topology — nodes, edges, Send fan-out, reflection routing |
+| [`backend/src/dossier/investigate/ground.py`](./backend/src/dossier/investigate/ground.py) | The "citations don't lie" mechanism — normalized substring match |
+| [`backend/src/dossier/eval/scorer.py`](./backend/src/dossier/eval/scorer.py) | Deterministic `citation_precision()` — no LLM judge |
+| [`backend/src/dossier/investigate/graph/nodes/synthesizer.py`](./backend/src/dossier/investigate/graph/nodes/synthesizer.py) | Sonnet call that produces `BriefSchema` claims with `quoted_span` |
+| [`backend/src/dossier/investigate/graph/nodes/gather_fanout.py`](./backend/src/dossier/investigate/graph/nodes/gather_fanout.py) | Concurrent tool calls via `asyncio.gather` inside a LangGraph node |
+| [`backend/src/dossier/investigate/graph/nodes/ingest_and_embed.py`](./backend/src/dossier/investigate/graph/nodes/ingest_and_embed.py) | Chunk + embed + Haiku injection classifier |
+| [`backend/src/dossier/core/llm.py`](./backend/src/dossier/core/llm.py) | `structured_call` wrapper — retry on transient OpenRouter errors |
+| [`backend/lambda_handler.py`](./backend/lambda_handler.py) | Lambda entry point — dispatches on event shape |
+| [`DECISIONS.md`](./DECISIONS.md) | 15 architectural choices with rejected alternatives |
 
-> **How to read this:** the synthesizer proposes ~30 claims per investigation.
-> The grounder accepts ~half. Of the accepted half, every single quoted span
-> is byte-identical to a substring of the cited source chunk. "Honest gap" is
-> our posture — rather than fabricate, we drop.
+---
 
-Run the scorecard yourself:
+## Running locally
+
+**Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/), Docker, pnpm
 
 ```bash
-cd backend && uv run python -m dossier.eval.report           # pretty table
-cd backend && uv run python -m dossier.eval.report --json    # machine-readable
+# Backend
+cp backend/.env.example backend/.env
+# Fill in: OPENROUTER_API_KEY, OPENAI_API_KEY, EXA_API_KEY, GITHUB_TOKEN,
+#          FIRECRAWL_API_KEY, NEWSAPI_API_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+
+docker compose up -d          # local Postgres with pgvector
+
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run uvicorn dossier.api.main:app --reload --port 8000
+
+# Frontend (separate terminal)
+cd frontend
+pnpm install
+# Set NEXT_PUBLIC_BACKEND_URL=http://localhost:8000 in frontend/.env.local
+pnpm dev
 ```
 
-Phase 4 would ship per-investigation scorecards inline in the UI. Demo-lite
-keeps the CLI.
+```bash
+# Tests
+cd backend && uv run pytest -q                     # 180 unit tests, no network
+cd backend && uv run pytest tests/integration -q   # requires live DB
+
+# Eval
+cd backend && uv run python -m dossier.eval.report
+cd backend && uv run python -m dossier.eval.report --json   # machine-readable
+```
 
 ---
 
-## Known Limitations
+## Deploying to AWS
 
-Open items where specific peer feedback would land best:
+```bash
+# First time
+cd infra/terraform
+terraform init
+terraform apply -target=aws_ecr_repository.backend   # ECR must exist before push
 
-- **Two dispatch pipelines in-tree** (`pipeline.py` linear + graph via
-  `runner.py`). Contract drift is a real risk (bit us once on deploy day
-  when `finalize` didn't persist `brief_markdown`). Post-capstone: delete
-  linear, unify on graph. See DECISIONS.md #12.
-- **Chat widen-search pulls arbitrary Exa results.** When retrieval is
-  weak (top-1 distance > 0.4), chat fires a fresh Exa query scoped to
-  the investigation subject and ingests new chunks *permanently* into
-  that investigation's corpus. A bad query can pollute the corpus; we
-  tag widened chunks in metadata so they can be audited/pruned, but
-  there's no automated cleanup.
-- **Markdown extraction from Exa/Firecrawl is occasionally lossy.**
-  Text artifacts like `$240million` (missing space) or `do not yd
-  enough` (truncated word) slip through. No pre-ingest normalization
-  layer exists.
-- **Account-level Lambda public-access block is a deploy-time gotcha.**
-  If you re-deploy to a fresh AWS account, the `/healthz` 403s until
-  you toggle the account setting in the Lambda console. Not captured
-  in Terraform (no CLI API at the time of this capstone).
-- **MarkItDown PDF conversion is text-only.** Image-heavy pitch decks
-  produce sparse briefs; no vision-model fallback in the demo build.
-  Phase 5 full-scope (pdf2image + vision) is post-capstone.
-- **RDS security group is `0.0.0.0/0` on port 5432.** Fine for demo,
-  tighten to a specific IP range for any real traffic.
+cd ../..
+make push     # docker build --platform linux/amd64 + ecr push
+make deploy   # push + terraform apply with image URI
+make migrate  # alembic upgrade head against RDS
+
+# Subsequent deploys
+make deploy
+make logs     # tail CloudWatch live
+```
+
+Required secrets (set in `infra/terraform/terraform.tfvars`):
+`OPENROUTER_API_KEY` · `OPENAI_API_KEY` · `EXA_API_KEY` · `GITHUB_TOKEN` · `FIRECRAWL_API_KEY` · `NEWSAPI_API_KEY` · `LANGFUSE_PUBLIC_KEY` · `LANGFUSE_SECRET_KEY` · `CLERK_JWKS_URL` · `DOSSIER_DISPATCH_MODE=lambda`
 
 ---
 
-## Quickstart (Phase 1)
+## Known limitations
 
-**Prereqs:** Docker, Python 3.12+, pnpm (or npm), [uv](https://docs.astral.sh/uv/) recommended.
+Honest gaps, not swept under the rug:
 
-1. Copy `.env.example` to `.env` and fill in Langfuse keys (OpenRouter key not required for Phase 1).
-2. Start local Postgres:
-   ```bash
-   docker-compose up -d postgres
-   ```
-3. Install backend deps and apply schema:
-   ```bash
-   cd backend
-   uv sync
-   uv run alembic upgrade head
-   ```
-4. Install frontend deps (skeleton only; no pages yet):
-   ```bash
-   cd frontend
-   pnpm install
-   ```
-5. Run unit tests:
-   ```bash
-   cd backend
-   uv run pytest tests/unit -q
-   ```
+- **Grounding rate is ~83%, not 100%.** Claims the synthesizer proposes but can't anchor to a verbatim source span are dropped. The brief is accurate but sometimes incomplete — some real facts don't survive the grounder if the source text is paraphrased rather than quoted directly.
+- **Single Lambda container.** The right architecture is two Lambdas: a thin `api-lambda` (30s timeout) for HTTP, and a heavy `investigate-lambda` (900s) for the graph. Collapsed to one image for demo simplicity. The dispatch seam is already cut in `lambda_handler.py`; splitting is purely additive.
+- **Deck upload async plumbing.** PDF investigations run as a Starlette BackgroundTask, which anyio runs in a worker thread while the Lambda event loop is live. The fix (`asyncio.run_coroutine_threadsafe`) is in `runner.run_graph_sync` — but this is the kind of subtle async bug that only surfaces at Lambda warm-start time, not locally.
+- **MarkItDown PDF extraction is text-only.** Image-heavy pitch decks produce sparse briefs. No vision-model fallback in the current build.
+- **RDS security group allows `0.0.0.0/0` on 5432.** Fine for demo, tighten to a specific CIDR for real traffic.
+- **OpenRouter transient errors.** OpenRouter occasionally returns non-JSON HTTP bodies to `beta.chat.completions.parse()`. Fixed with a 3-attempt retry on `JSONDecodeError` in `llm.structured_call_with_status`.
+
+---
 
 ## Repo layout
 
-- `backend/` — Python package (FastAPI/LangGraph deferred to later phases)
-- `frontend/` — Next.js 16 App Router skeleton (pages deferred to Phase 2)
-- `infra/terraform/` — Terraform stubs (not applied in Phase 1)
-- `docker-compose.yml` — local Postgres (pgvector/pgvector:pg17)
-- `.planning/` — GSD planning docs (gitignored, local only)
-
-## Locked decisions
-
-See `CLAUDE.md`. Do not re-litigate:
-OpenRouter via stock openai SDK · LangGraph 1.0 + AsyncPostgresSaver · Lambda container images · RDS Proxy mandatory · Next.js 16 + Clerk + @microsoft/fetch-event-source · Langfuse 3.x · Exa (not Tavily) · public data only.
-
-## Deployment (minimal AWS)
-
-The infra lives in `infra/terraform/` (single flat stack: one ECR repo, one
-RDS Postgres, one IAM role, one Lambda container + Function URL — no VPC,
-no RDS Proxy, no API Gateway, no S3). All AWS wiring is driven by the repo-root
-`Makefile`.
-
-### First-time deploy
-
-```bash
-# 1. Fill in secrets
-cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
-# edit terraform.tfvars — env_vars map needs the 11 backend keys
-# (OPENROUTER_API_KEY, OPENAI_API_KEY, LANGFUSE_*, CLERK_JWKS_URL,
-#  EXA_API_KEY, GITHUB_TOKEN, FIRECRAWL_API_KEY, NEWSAPI_API_KEY,
-#  CRUNCHBASE_API_KEY) + DOSSIER_DISPATCH_MODE=lambda.
-
-# 2. Initialize Terraform, bootstrap ECR (must exist before `docker push`)
-cd infra/terraform && terraform init
-terraform apply -target=aws_ecr_repository.backend
-
-# 3. Build, push, apply everything else
-cd ../..    # back to repo root
-make push   # docker build --platform linux/amd64 + aws ecr push
-make deploy # push (re-runs) + terraform apply with the real image URI
-
-# 4. Apply DB schema once RDS is reachable
-make migrate   # alembic upgrade head, DATABASE_URL pulled from terraform output
-
-# 5. Point the frontend at the live backend
-cd infra/terraform && terraform output lambda_function_url
-#   -> https://<id>.lambda-url.us-east-1.on.aws/
-# Set that URL as NEXT_PUBLIC_BACKEND_URL in Vercel project env and redeploy.
 ```
-
-### Subsequent deploys
-
-```bash
-make deploy        # rebuild + push + terraform apply
-make migrate       # only when schema changes (alembic revision added)
-make logs          # tail /aws/lambda/<func>/... live
+├── backend/
+│   ├── src/dossier/
+│   │   ├── api/              FastAPI routes, schemas, Clerk JWT middleware
+│   │   ├── core/             settings, DB engine, LLM helpers, exceptions
+│   │   ├── eval/             eval harness: seed, scorer, report CLI
+│   │   └── investigate/
+│   │       ├── graph/        LangGraph state, nodes, runner, graph topology
+│   │       ├── tools/        Exa, GitHub, Firecrawl, NewsAPI, Crunchbase clients
+│   │       ├── ground.py     substring-match citation verifier
+│   │       ├── ingest.py     chunk + embed pipeline
+│   │       ├── synthesize.py Sonnet brief synthesis
+│   │       └── chat.py       grounded chat turn handler
+│   ├── tests/
+│   │   ├── unit/             ~180 tests, no network required
+│   │   └── integration/      live DB required
+│   ├── lambda_handler.py     Lambda entry point (event-shape dispatch)
+│   └── Dockerfile            Lambda container image (includes poppler-utils)
+├── frontend/
+│   └── src/app/              Next.js 16 App Router pages + components
+├── infra/terraform/          Single-stack AWS (ECR + Lambda + RDS + Amplify)
+├── DECISIONS.md              15 architectural choices with rejected alternatives
+└── Makefile                  build / push / deploy / migrate / logs
 ```
-
-### Tear down
-
-```bash
-make destroy       # terraform destroy (drops RDS data; ECR images stay unless
-                   # lifecycle policy evicts them)
-```
-
-### Makefile target index
-
-```bash
-make help          # self-documenting target list
-```
-
-Tradeoffs: a single Lambda container serves both the FastAPI surface and the
-LangGraph investigate path — dispatch is by event shape in `backend/lambda_handler.py`.
-The proper two-Lambda split (api-lambda 30s / investigate-lambda 900s) is a
-post-capstone refactor; the seam is already cut so the split is additive.

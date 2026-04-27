@@ -1,12 +1,3 @@
-"""Finalize — ground draft claims, render the brief, mark complete.
-
-Reconstructs a Brief from state.draft_claims (cheap, ~6 lines) instead of
-threading the full Brief through state — keeps checkpoint rows small.
-
-Uses k=50 for grounding vs k=20 for synthesis: grounding is mechanical
-substring matching, recall matters more than token budget. Synthesis was
-limited by what the LLM can read.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -65,10 +56,7 @@ async def run(state: DossierState) -> dict:
         ground_claims, investigation_uuid, brief, retrieved
     )
 
-    # Build the chunk_id → url map across the whole investigation corpus
-    # so claims can be cited even when grounding pinned them to a chunk
-    # outside the top-k. Fail-open: if the SELECT errors, render with an
-    # empty map and let claims fall back to "(source)" without a link.
+    # url_by_chunk spans the whole corpus, not just top-k — grounder may pin outside the window.
     from dossier.investigate.render import brief_to_markdown as _brief_to_markdown  # noqa: PLC0415
     url_by_chunk: dict[str, str] = {}
     try:
@@ -78,8 +66,7 @@ async def run(state: DossierState) -> dict:
         logger.exception("finalize: url_by_chunk lookup failed; rendering without links")
     brief_md = _brief_to_markdown(brief, url_by_chunk)
 
-    # Single transaction for the status flip + grounded-claim readback so
-    # they observe a consistent snapshot of the claims table.
+    # Status flip + grounded-claim readback in one tx so they observe a consistent snapshot.
     grounded: list[GroundedClaimRef] = []
     async with get_async_session() as session:
         async with session.begin():

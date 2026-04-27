@@ -1,9 +1,5 @@
-"""GitHub REST wrapper for founder profile + recent repos.
-
-Uses httpx directly (not PyGithub) — three calls per investigation isn't worth
-a heavier SDK. Falls back to unauthenticated (60 req/hr) when no PAT is set.
-"""
 from __future__ import annotations
+# Falls back to unauthenticated (60 req/hr) when no PAT is set.
 
 import logging
 from typing import Any
@@ -57,11 +53,7 @@ def _get_json(client: httpx.Client, path: str, params: dict[str, Any] | None = N
 
 
 def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> list[ToolResult]:
-    """Search GitHub for `founder_name`, return profile + 5 recent repos.
-
-    Fail-open: returns [] on no match or search error. Once the search succeeds,
-    individual profile/repo failures are logged and skipped, not fatal.
-    """
+    # Fail-open on no match / search error. Per-repo failures are logged + skipped.
     tok = token if token is not None else read_github_env(strict=False)
     with httpx.Client(
         base_url=GITHUB_API_BASE,

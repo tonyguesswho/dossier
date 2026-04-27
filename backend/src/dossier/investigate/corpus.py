@@ -1,15 +1,3 @@
-"""Investigation corpus — read, write, widen.
-
-Owns "the source corpus belonging to one investigation" as a coherent
-seam. Chat asks the corpus for top_k chunks, asks it to widen on a
-question, asks it for the chunk_id → url map for citation rendering.
-Chat does not import Exa, ingest plumbing, or ToolResult tagging.
-
-The subject-scoping rule for widen lives here, not in callers: a generic
-question like "where is HQ" embedded alone matches headquarters pages for
-any famous company and permanently pollutes the corpus. Always prefix
-with the subject. `widen` without a subject is a no-op.
-"""
 from __future__ import annotations
 
 import logging
@@ -39,12 +27,10 @@ def top_k(
     k: int = DEFAULT_TOP_K,
     engine: Engine | None = None,
 ) -> list[RetrievedChunk]:
-    """Top-k chunks scoped to one investigation, closest first."""
     return retrieve_top_k(investigation_id, query, k=k, engine=engine)
 
 
 def urls_by_chunk(eng: Engine, investigation_id: UUID) -> dict[str, str]:
-    """chunk_id → source url across the investigation corpus."""
     return repo.url_by_chunk(eng, investigation_id)
 
 
@@ -55,15 +41,9 @@ def widen(
     question: str,
     engine: Engine,
 ) -> int:
-    """Subject-scoped Exa widen. Tags new chunks with widen metadata so an
-    audit can find them and prune corpus pollution if the question went
-    off-target despite the subject. Returns ingested count.
-
-    Never raises — the caller (chat) must complete its turn with whatever
-    is already in the corpus. Without a subject, returns 0 immediately;
-    embedding a bare question pollutes the corpus with whatever Exa thinks
-    it's about.
-    """
+    # Subject scoping is critical: a generic question alone matches headquarters
+    # pages for any famous company and permanently pollutes the corpus.
+    # Never raises — chat must complete its turn with whatever is already in the corpus.
     if not subject:
         logger.warning("corpus.widen: skipped — no subject provided")
         return 0
@@ -86,6 +66,7 @@ def widen(
     if not new_results:
         return 0
 
+    # Tag widen metadata so an audit can prune corpus pollution if the question went off-target.
     tagged = [
         ToolResult(
             url=r.url,

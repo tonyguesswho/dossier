@@ -1,17 +1,3 @@
-"""Investigations API — POST/GET/PATCH/DELETE/re-run.
-
-Every route requires Depends(require_clerk_user_id). All SQL goes through
-`dossier.investigate.repository`, which owns the auth-scoping discipline
-(`AND user_id = :u`).
-
-POST dispatches the pipeline via DOSSIER_DISPATCH_MODE:
-  - "local" (default): FastAPI BackgroundTasks runs the graph in-process.
-  - "lambda": boto3.invoke(InvocationType='Event') self-invokes this same
-    container; lambda_handler routes the event to runner.run_graph.
-
-Rate limit: 10 investigations per Clerk user per rolling 24h, enforced by
-SELECT COUNT(*) — cheap, no Redis.
-"""
 from __future__ import annotations
 
 import json
@@ -72,10 +58,8 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
 
 
 def _run_graph_sync(investigation_id: UUID) -> None:
-    """BackgroundTasks takes sync callables; runner.run_graph is async."""
-    import asyncio  # noqa: PLC0415
-    from dossier.investigate.graph.runner import run_graph  # noqa: PLC0415
-    asyncio.run(run_graph(str(investigation_id)))
+    from dossier.investigate.graph.runner import run_graph_sync  # noqa: PLC0415
+    run_graph_sync(str(investigation_id))
 
 
 def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
@@ -83,14 +67,7 @@ def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -
 
 
 def _dispatch_lambda(investigation_id: UUID) -> None:
-    """Fire-and-forget self-invoke. The same container hosts the investigate
-    handler; InvocationType='Event' returns immediately so POST stays under the
-    Function URL's ~30s budget.
-
-    Picked over SQS / EventBridge / Step Functions because the per-user 10/day
-    rate limit caps Lambda self-invocations well below quota and avoids the
-    extra resources / IAM wiring those alternatives need.
-    """
+    # Fire-and-forget self-invoke; Event returns immediately so POST stays under the 30s URL budget.
     import boto3  # noqa: PLC0415
 
     function_name = get_settings().lambda_function_name
@@ -112,9 +89,7 @@ def _dispatch_lambda(investigation_id: UUID) -> None:
 
 
 def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    """Read DOSSIER_DISPATCH_MODE at call time so flipping it doesn't need a
-    process restart.
-    """
+    # Read mode at call time so flipping the env var doesn't need a process restart.
     mode = get_settings().dispatch_mode
     if mode == "lambda":
         _dispatch_lambda(investigation_id)
@@ -160,9 +135,7 @@ def create_investigation(
     return CreateInvestigationResponse(id=investigation_id, status="queued")
 
 
-# 17 MB cap covers the ~98th percentile of real decks; small enough to not
-# DoS the single Lambda. application/octet-stream is accepted because curl
-# without -H sends that — magic-byte check is inside MarkItDown.
+# 17 MB ≈ 98th percentile of real decks. octet-stream is accepted because curl without -H sends it.
 DECK_MAX_BYTES: int = 17 * 1024 * 1024
 DECK_MIN_BYTES: int = 100
 DECK_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
@@ -181,7 +154,6 @@ def upload_deck_investigation(
     file: Annotated[UploadFile, File(...)],
     context_hint: Annotated[str | None, Form()] = None,
 ) -> CreateInvestigationResponse:
-    """Convert an uploaded PDF via MarkItDown, dispatch as a deck investigation."""
     from dossier.investigate.deck import (  # noqa: PLC0415
         extract_company_from_markdown,
         pdf_to_markdown,
@@ -216,8 +188,7 @@ def upload_deck_investigation(
     repo.upsert_user(eng, clerk_user_id)
 
     investigation_id = uuid4()
-    # Extract subject company from the cover slide via Haiku — using the
-    # filename pulled in unrelated companies during chat widen-search.
+    # Use Haiku to extract subject — using filename pulled in unrelated companies during widen-search.
     extracted_company: str | None = None
     try:
         extracted_company = extract_company_from_markdown(markdown)
@@ -228,8 +199,6 @@ def upload_deck_investigation(
         "deck upload: investigation_id=%s filename=%r extracted=%r using=%r",
         investigation_id, filename, extracted_company, display_value,
     )
-    # Keep the filename in the hint suffix so the library card and logs can
-    # always link back to the upload, even when display_value is the company.
     hint_parts: list[str] = []
     if extracted_company:
         hint_parts.append(f"deck: {filename}")
@@ -247,8 +216,7 @@ def upload_deck_investigation(
         input_ref=input_ref,
     )
 
-    # Pinned to local dispatch — deck markdown isn't persisted to S3 and the
-    # 256 KB Event-invoke payload limit can't carry it.
+    # Local-only: deck markdown can't fit the 256 KB Event-invoke payload + isn't on S3 yet.
     background_tasks.add_task(
         run_deck_investigation, investigation_id, markdown, filename
     )

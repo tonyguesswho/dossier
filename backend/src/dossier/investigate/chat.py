@@ -1,16 +1,3 @@
-"""RAG chat — top-k retrieve, Sonnet answer, citation resolution.
-
-Per turn:
-  retrieve top-k → (widen-search if retrieval is weak) → call Sonnet with
-  ChatAnswer schema → replace [S:<chunk_id>] markers with markdown links →
-  persist user + assistant turns atomically.
-
-Widen-search fires a fresh Exa query when the top retrieved chunk's cosine
-distance exceeds WEAK_RETRIEVAL_DISTANCE. The query is always prefixed with
-the investigation subject — without that scoping, a generic question like
-"where is HQ" matches headquarters pages for any famous company and
-permanently pollutes the corpus.
-"""
 from __future__ import annotations
 
 import logging
@@ -33,7 +20,7 @@ DEFAULT_CHAT_TOP_K: int = 6
 
 
 class ChatAnswer(BaseModel):
-    """extra='forbid' so OpenAI structured-output compiles a strict schema."""
+    # extra='forbid' so OpenAI structured-output compiles a strict schema.
     model_config = ConfigDict(extra="forbid")
     answer_text: str
     cited_chunk_ids: list[str]
@@ -82,9 +69,7 @@ def answer_with_citations(
     subject: str | None = None,
     client: Any = None,
 ) -> ChatAnswer:
-    """Sonnet structured-output call. Fail-open on parsed=None — a malformed
-    chat response degrades to a visible apology, never 500s the request.
-    """
+    # Fail-open on parsed=None — a malformed chat response degrades to a visible apology, never 500s.
     parsed = structured_call(
         ChatAnswer,
         messages=[
@@ -106,10 +91,7 @@ _CITATION_RE = re.compile(r"\[S:([^\]]+)\]")
 
 
 def resolve_citations(answer_text: str, url_by_chunk: dict[str, str]) -> str:
-    """Replace [S:<chunk_id>] markers with `([source](url))`. Unknown ids fall
-    back to literal `(source)` so a hallucinated id doesn't render a broken link.
-    """
-
+    # Unknown ids render as `(source)` (no link) so a hallucinated id doesn't break navigation.
     def _replace(match: re.Match[str]) -> str:
         chunk_id = match.group(1).strip()
         url = url_by_chunk.get(chunk_id)
@@ -130,12 +112,6 @@ def run_chat_turn(
     engine: Engine | None = None,
     client: Any = None,
 ) -> tuple[str, list[str]]:
-    """retrieve → widen if weak → synthesize → resolve → persist.
-
-    Both turns persist in one transaction so a mid-write crash can't leave
-    an orphan user turn that the history endpoint would render as a
-    dangling question.
-    """
     eng = engine if engine is not None else get_engine()
 
     subject = repo.get_investigation_subject(eng, investigation_id)

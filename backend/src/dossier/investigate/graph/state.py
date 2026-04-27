@@ -1,18 +1,7 @@
-"""DossierState — shared scratchpad for the investigation graph.
-
-List fields use `Annotated[list[X], operator.add]` so parallel Send branches
-concatenate safely instead of fighting last-write-wins. Scalars replace on
-write per standard TypedDict semantics.
-
-Nodes do NOT write raw dicts to mutate state — they go through
-`state_accessors.append_*` (additive lists) and `state_accessors.set_*`
-(scalars). The accessor name encodes the reducer semantic so reviewers
-don't have to cross-reference annotations down here.
-
-Do NOT put raw source text in state. Chunk IDs and offsets travel here;
-the text lives in source_chunks and S3.
-"""
 from __future__ import annotations
+# Annotated[list[X], add] makes parallel Send branches concatenate safely.
+# Nodes mutate via state_accessors.{append_*, set_*}, never raw dicts.
+# Raw source text MUST NOT enter state — chunk refs only; text lives in source_chunks/S3.
 
 from operator import add
 from typing import Annotated, TypedDict
@@ -26,8 +15,6 @@ class FounderCandidate(BaseModel):
 
 
 class FounderCandidates(BaseModel):
-    """JSON-mode response from the founder-extraction LLM (capped at 5)."""
-
     founders: list[FounderCandidate]
 
 
@@ -42,17 +29,13 @@ class RetrievedChunkRef(BaseModel):
 
 
 class DraftClaimRef(BaseModel):
-    """Claim emitted by the synthesizer before grounding."""
-
     section: str  # 'founders'|'company'|'market'|'product'|'risk'|'suggested_questions'
     claim_text: str
-    quoted_span: str  # verbatim text pulled from retrieved content
+    quoted_span: str
     source_chunk_id: str
 
 
 class GroundedClaimRef(BaseModel):
-    """Claim after finalize writes it to the claims table."""
-
     claim_id: str
     section: str
     claim_text: str
@@ -68,8 +51,7 @@ class DossierState(TypedDict):
     input_url: str | None  # set when input_type='url'; triggers Firecrawl
     input_type: str  # 'name' | 'url' | 'deck'
 
-    # Reflection control — verifier increments count, sets regather flag
-    # when a section has zero claims and count < 2.
+    # Reflection control — verifier sets regather when a section has zero claims and count<2.
     reflection_count: int
     should_regather: bool
     targeted_sections: list[str]
