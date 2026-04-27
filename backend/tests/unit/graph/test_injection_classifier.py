@@ -1,27 +1,16 @@
-"""Tests for the real Haiku 4.5 injection classifier (GUARD-02 / D-06 / BLOCKER-4).
-
-Plan 03-08 replaces the pass-through stub in `ingest_and_embed._classify_chunk`
-with a real LLM-judge. This file covers the classifier body directly; end-to-
-end chunk-level dispatch (injection chunks → injection_attempts table, clean
-chunks → source_chunks) is exercised in test_ingest_and_embed.py alongside the
-drain/cache fixtures.
+"""Tests for the Haiku-backed injection classifier.
 
 Key invariants verified:
   - _classify_chunk() remains an async coroutine returning (verdict, reason).
     Its signature is frozen because ingest_and_embed.run() fans it out via
-    asyncio.gather — a signature change would ripple into the chunk-first
-    pipeline (WARNING-4 / BLOCKER-4).
+    asyncio.gather.
   - Injection verdict surfaces when the LLM flags adversarial text.
   - Clean verdict surfaces for ordinary company content.
-  - Fail-open on ANY LLM error (exception, refusal, parsed=None) — an
-    unavailable classifier must not stall the investigation (T-03-08-05).
-  - The full chunk text (no 2000-char truncation) appears in the user prompt
-    the LLM sees. BLOCKER-4: chunks are already ~800 tokens by construction
-    from _chunk_text, and capping would reintroduce the regression where
-    injection strings past a truncation boundary escape the judge.
+  - LLM errors degrade to a clean verdict so the investigation keeps moving.
+  - The full chunk text appears in the user prompt seen by the model.
 
 No real OpenAI calls — a fake client is injected via monkeypatching
-`strong_model` (the canonical entry point per core/llm.py docstring).
+`strong_model`.
 """
 from __future__ import annotations
 
@@ -45,8 +34,7 @@ class _FakeParsed:
 class _FakeClient:
     """Fake OpenAI client exposing `.beta.chat.completions.parse(...)` only.
 
-    Captures the last `messages=` payload so tests can assert on the prompt
-    content (BLOCKER-4 full-chunk-in-prompt verification).
+    Captures the last `messages=` payload so tests can assert on prompt content.
     """
 
     def __init__(

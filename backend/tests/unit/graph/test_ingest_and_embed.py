@@ -1,23 +1,10 @@
 """Unit tests for ingest_and_embed node.
 
 Scope:
-  - _TOOL_RESULT_CACHE drain semantics (populated by gather_fanout; drained here).
-  - run() with empty cache is a no-op (returns {}, doesn't crash).
-  - cache_tool_result + run() wiring calls asyncio.to_thread(ingest_tool_results)
-    with all cached results when the classifier passes everything clean.
-  - Cache is cleared after run() completes (no cross-investigation bleed).
+  - run() with no staged sources for the current pass is a no-op.
+  - staged sources flow into ingest_tool_results when the classifier passes.
+  - only the current reflection pass is ingested.
   - run() bypasses the DB session when there are no injection chunks.
-
-Tests drive the node WITHOUT touching a real DB and WITHOUT calling the real
-LLM — `ingest_tool_results` is monkeypatched and `_classify_chunk` is swapped
-for a pass-through stub in tests that exercise `run()`. The real classifier
-body is covered by `test_injection_classifier.py` (Plan 03-08).
-
-Plan 03-08 replaced the pass-through `_classify_chunk` stub with a Haiku 4.5
-LLM-judge. The two stub-asserting tests from Plan 03-06
-(`test_classify_chunk_stub_always_clean` + the adversarial variant) were
-removed — the classifier now hits OpenRouter, and the behavioural contract
-is exercised against mocked LLM responses in test_injection_classifier.py.
 """
 from __future__ import annotations
 
@@ -25,10 +12,8 @@ import asyncio
 from datetime import datetime, timezone
 from uuid import uuid4
 
-import pytest
-
 from dossier.investigate.graph.nodes import ingest_and_embed
-from dossier.investigate.tools.types import ToolResult
+from dossier.investigate.graph.state import StagedSourceRef
 
 
 def _make_state(investigation_id: str, **overrides):
@@ -41,7 +26,7 @@ def _make_state(investigation_id: str, **overrides):
         "should_regather": False,
         "targeted_sections": [],
         "founder_candidates": [],
-        "retrieved_chunks": [],
+        "staged_sources": [],
         "draft_claims": [],
         "grounded_claims": [],
     }
@@ -49,132 +34,82 @@ def _make_state(investigation_id: str, **overrides):
     return base
 
 
-def _make_tool_result(url: str, text: str = "Some source content about TestCo.") -> ToolResult:
-    return ToolResult(
+def _make_staged_source(
+    url: str,
+    text: str = "Some source content about TestCo.",
+    *,
+    pass_index: int = 0,
+) -> StagedSourceRef:
+    return StagedSourceRef(
         url=url,
         source_kind="web",
         text=text,
         title="TestCo Home",
         fetched_at=datetime.now(timezone.utc),
         raw_metadata={},
+        section_hint="general",
+        pass_index=pass_index,
     )
 
 
-def _clear_cache():
-    """Reset module-level cache between tests."""
-    ingest_and_embed._TOOL_RESULT_CACHE.clear()
-
-
-@pytest.fixture(autouse=True)
-def _isolate_cache():
-    _clear_cache()
-    yield
-    _clear_cache()
-
-
 async def _passthrough_classifier(_chunk_text: str) -> tuple[str, str]:
-    """Monkeypatch replacement for `_classify_chunk` in run()-exercising tests.
-
-    The real classifier hits OpenRouter (Plan 03-08). Tests that exercise
-    `run()`'s chunk-first pipeline don't care about the classifier body —
-    they care about drain/ingest wiring — so we stub to ('clean', '') to
-    keep the tests hermetic. Classifier behaviour itself is covered in
-    test_injection_classifier.py via mocked LLM fixtures.
-    """
     return "clean", ""
 
 
-def test_run_with_empty_cache_is_noop():
-    """No cached tool results → run() returns {} without opening the DB."""
+def test_run_with_no_staged_sources_is_noop():
     inv_id = str(uuid4())
     state = _make_state(inv_id)
     result = asyncio.run(ingest_and_embed.run(state))
     assert result == {}
 
 
-def test_cache_tool_result_same_url_overwrites():
-    """Re-gather pass must overwrite rather than duplicate (per cache_tool_result docstring)."""
+def test_run_passes_current_pass_sources_to_ingest_tool_results(monkeypatch):
     inv_id = str(uuid4())
-    first = _make_tool_result("https://example.com/a", text="first")
-    second = _make_tool_result("https://example.com/a", text="second")
-    ingest_and_embed.cache_tool_result(inv_id, first)
-    ingest_and_embed.cache_tool_result(inv_id, second)
-    assert ingest_and_embed._TOOL_RESULT_CACHE[inv_id]["https://example.com/a"].text == "second"
-
-
-def test_run_passes_cached_results_to_ingest_tool_results(monkeypatch):
-    """Happy path: cached ToolResults reach ingest_tool_results via asyncio.to_thread.
-
-    BLOCKER-4 structural check: verify asyncio.gather fires before the sync
-    ingest call (the flat_chunks + verdicts arrays are built first). We can
-    observe this indirectly via call ordering on a stubbed ingest_tool_results.
-    """
-    inv_id = str(uuid4())
-    tr1 = _make_tool_result("https://example.com/a", text="aaa " * 50)
-    tr2 = _make_tool_result("https://example.com/b", text="bbb " * 50)
-    ingest_and_embed.cache_tool_result(inv_id, tr1)
-    ingest_and_embed.cache_tool_result(inv_id, tr2)
+    src1 = _make_staged_source("https://example.com/a", text="aaa " * 50)
+    src2 = _make_staged_source("https://example.com/b", text="bbb " * 50)
 
     captured: dict = {}
 
     def _fake_ingest(investigation_id, results, **kwargs):
-        # Phase 2 signature: ingest_tool_results(investigation_id, results, *, engine=None)
         captured["investigation_id"] = str(investigation_id)
         captured["urls"] = sorted(r.url for r in results)
 
-    # Patch the name resolved inside ingest_and_embed.run()
     import dossier.investigate.ingest as ingest_mod
     monkeypatch.setattr(ingest_mod, "ingest_tool_results", _fake_ingest)
-    # Skip the real (OpenRouter) classifier — exercised in test_injection_classifier.py
     monkeypatch.setattr(ingest_and_embed, "_classify_chunk", _passthrough_classifier)
 
-    state = _make_state(inv_id)
+    state = _make_state(inv_id, staged_sources=[src1, src2])
     out = asyncio.run(ingest_and_embed.run(state))
 
-    assert out == {}, "run() returns empty dict (retrieved_chunks untouched)"
+    assert out == {}
     assert captured["investigation_id"] == inv_id
     assert captured["urls"] == ["https://example.com/a", "https://example.com/b"]
 
 
-def test_run_clears_cache_after_drain(monkeypatch):
-    """Cache for this investigation_id must be popped after a successful run."""
+def test_run_only_uses_current_reflection_pass(monkeypatch):
     inv_id = str(uuid4())
-    ingest_and_embed.cache_tool_result(inv_id, _make_tool_result("https://x.com"))
+    current = _make_staged_source("https://current.com", text="ccc " * 50, pass_index=1)
+    previous = _make_staged_source("https://previous.com", text="ppp " * 50, pass_index=0)
+    captured: dict = {}
+
+    def _fake_ingest(_investigation_id, results, **kwargs):
+        captured["urls"] = [r.url for r in results]
 
     import dossier.investigate.ingest as ingest_mod
-    monkeypatch.setattr(ingest_mod, "ingest_tool_results", lambda *a, **k: None)
+    monkeypatch.setattr(ingest_mod, "ingest_tool_results", _fake_ingest)
     monkeypatch.setattr(ingest_and_embed, "_classify_chunk", _passthrough_classifier)
 
-    asyncio.run(ingest_and_embed.run(_make_state(inv_id)))
-    assert inv_id not in ingest_and_embed._TOOL_RESULT_CACHE
-
-
-def test_run_isolates_cache_across_investigations(monkeypatch):
-    """Two investigations in the cache: run(inv_a) must NOT drain inv_b."""
-    inv_a = str(uuid4())
-    inv_b = str(uuid4())
-    ingest_and_embed.cache_tool_result(inv_a, _make_tool_result("https://a.com"))
-    ingest_and_embed.cache_tool_result(inv_b, _make_tool_result("https://b.com"))
-
-    import dossier.investigate.ingest as ingest_mod
-    monkeypatch.setattr(ingest_mod, "ingest_tool_results", lambda *a, **k: None)
-    monkeypatch.setattr(ingest_and_embed, "_classify_chunk", _passthrough_classifier)
-
-    asyncio.run(ingest_and_embed.run(_make_state(inv_a)))
-    assert inv_a not in ingest_and_embed._TOOL_RESULT_CACHE
-    assert inv_b in ingest_and_embed._TOOL_RESULT_CACHE
-    assert "https://b.com" in ingest_and_embed._TOOL_RESULT_CACHE[inv_b]
+    asyncio.run(
+        ingest_and_embed.run(
+            _make_state(inv_id, reflection_count=1, staged_sources=[previous, current])
+        )
+    )
+    assert captured["urls"] == ["https://current.com"]
 
 
 def test_run_skips_ingest_when_only_empty_text_sources(monkeypatch):
-    """All-empty-text sources still exercise the chunk → classify path without crashing.
-
-    `_chunk_text` returns [] for empty strings (see ingest.py line 105-107) so
-    total_chunks==0 triggers the 'no chunks produced' early return. Must not
-    call ingest_tool_results in that case — nothing to ingest.
-    """
     inv_id = str(uuid4())
-    ingest_and_embed.cache_tool_result(inv_id, _make_tool_result("https://x.com", text=""))
+    source = _make_staged_source("https://x.com", text="")
 
     called = []
     import dossier.investigate.ingest as ingest_mod
@@ -182,8 +117,6 @@ def test_run_skips_ingest_when_only_empty_text_sources(monkeypatch):
         ingest_mod, "ingest_tool_results", lambda *a, **k: called.append("yes")
     )
 
-    out = asyncio.run(ingest_and_embed.run(_make_state(inv_id)))
+    out = asyncio.run(ingest_and_embed.run(_make_state(inv_id, staged_sources=[source])))
     assert out == {}
-    assert called == [], "ingest_tool_results must not be called when 0 chunks produced"
-
-
+    assert called == []

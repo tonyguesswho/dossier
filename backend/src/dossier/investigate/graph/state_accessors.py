@@ -1,15 +1,14 @@
 from __future__ import annotations
-# append_* → additive list reducer; set_* → scalar replace. Names are the contract.
 
-from .state import DraftClaimRef, GroundedClaimRef, RetrievedChunkRef
+from .state import DraftClaimRef, GroundedClaimRef, StagedSourceRef
 
 
 def append_founder_candidates(names: list[str]) -> dict:
     return {"founder_candidates": names}
 
 
-def append_retrieved_chunks(refs: list[RetrievedChunkRef]) -> dict:
-    return {"retrieved_chunks": refs}
+def append_staged_sources(refs: list[StagedSourceRef]) -> dict:
+    return {"staged_sources": refs}
 
 
 def append_draft_claims(claims: list[DraftClaimRef]) -> dict:
@@ -36,7 +35,7 @@ def set_reflection(
 
 __all__ = [
     "append_founder_candidates",
-    "append_retrieved_chunks",
+    "append_staged_sources",
     "append_draft_claims",
     "append_grounded_claims",
     "set_reflection",

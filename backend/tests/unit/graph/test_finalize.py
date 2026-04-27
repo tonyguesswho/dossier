@@ -33,7 +33,7 @@ def _make_state(investigation_id: str, draft_claims=None, **overrides):
         "should_regather": False,
         "targeted_sections": [],
         "founder_candidates": [],
-        "retrieved_chunks": [],
+        "staged_sources": [],
         "draft_claims": draft_claims or [],
         "grounded_claims": [],
     }

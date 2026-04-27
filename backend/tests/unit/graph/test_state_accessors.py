@@ -7,13 +7,13 @@ from dossier.investigate.graph.state import (
     DossierState,
     DraftClaimRef,
     GroundedClaimRef,
-    RetrievedChunkRef,
+    StagedSourceRef,
 )
 from dossier.investigate.graph.state_accessors import (
     append_draft_claims,
     append_founder_candidates,
     append_grounded_claims,
-    append_retrieved_chunks,
+    append_staged_sources,
     set_reflection,
 )
 
@@ -28,11 +28,11 @@ def test_append_founder_candidates_writes_correct_field() -> None:
     assert "founder_candidates" in _state_keys()
 
 
-def test_append_retrieved_chunks_writes_correct_field() -> None:
-    refs: list[RetrievedChunkRef] = []
-    out = append_retrieved_chunks(refs)
-    assert out == {"retrieved_chunks": []}
-    assert "retrieved_chunks" in _state_keys()
+def test_append_staged_sources_writes_correct_field() -> None:
+    refs: list[StagedSourceRef] = []
+    out = append_staged_sources(refs)
+    assert out == {"staged_sources": []}
+    assert "staged_sources" in _state_keys()
 
 
 def test_append_draft_claims_writes_correct_field() -> None:
@@ -67,7 +67,7 @@ def test_accessor_keys_subset_of_state_keys() -> None:
     accessor_keys: set[str] = set()
     for fn, args in (
         (append_founder_candidates, ([],)),
-        (append_retrieved_chunks, ([],)),
+        (append_staged_sources, ([],)),
         (append_draft_claims, ([],)),
         (append_grounded_claims, ([],)),
     ):

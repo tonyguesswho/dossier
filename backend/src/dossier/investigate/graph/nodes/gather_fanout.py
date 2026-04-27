@@ -10,34 +10,31 @@ from dossier.investigate.tools.crunchbase import search as crunchbase_search
 from dossier.investigate.tools.newsapi import search as newsapi_search
 from dossier.investigate.tools.types import ToolResult
 
-from ..state_accessors import append_retrieved_chunks
+from ..state_accessors import append_staged_sources
 
-from ..state import DossierState, RetrievedChunkRef
-from .ingest_and_embed import cache_tool_result
+from ..state import DossierState, StagedSourceRef
 
 logger = logging.getLogger(__name__)
 
 
-def _cache_results(investigation_id: str, results: list[ToolResult]) -> None:
-    for result in results:
-        cache_tool_result(investigation_id, result)
-
-
-def _tool_results_to_chunk_refs(
-    results: list[ToolResult], section_hint: str = "general"
-) -> list[RetrievedChunkRef]:
-    # Refs without text — ingest_and_embed fills real chunk ids/offsets after the DB insert.
-    refs: list[RetrievedChunkRef] = []
+def _tool_results_to_staged_sources(
+    results: list[ToolResult],
+    *,
+    section_hint: str = "general",
+    pass_index: int,
+) -> list[StagedSourceRef]:
+    refs: list[StagedSourceRef] = []
     for r in results:
         refs.append(
-            RetrievedChunkRef(
-                chunk_id="",
-                source_id="",
+            StagedSourceRef(
                 url=r.url,
                 source_kind=r.source_kind,
-                char_start=0,
-                char_end=len(r.text),
+                text=r.text,
+                title=r.title,
+                fetched_at=r.fetched_at,
+                raw_metadata=r.raw_metadata,
                 section_hint=section_hint,
+                pass_index=pass_index,
             )
         )
     return refs
@@ -50,16 +47,18 @@ async def _run_tool_node(
     section_hint: str,
     invoke: Callable[[], Awaitable[list[ToolResult]]],
 ) -> dict:
-    # Fail-open envelope shared by every tool node.
     try:
         results = await invoke()
     except Exception:  # noqa: BLE001 — fail-open is the contract
         logger.warning("run_%s: error", label, exc_info=True)
         results = []
-    _cache_results(state["investigation_id"], results)
-    refs = _tool_results_to_chunk_refs(results, section_hint=section_hint)
+    refs = _tool_results_to_staged_sources(
+        results,
+        section_hint=section_hint,
+        pass_index=state.get("reflection_count", 0),
+    )
     logger.info("run_%s: got %d results", label, len(results))
-    return append_retrieved_chunks(refs)
+    return append_staged_sources(refs)
 
 
 async def run(state: DossierState) -> dict:
@@ -126,7 +125,7 @@ async def run_newsapi(state: DossierState) -> dict:
 async def run_firecrawl(state: DossierState) -> dict:
     input_url = state.get("input_url")
     if not input_url:
-        return append_retrieved_chunks([])
+        return append_staged_sources([])
 
     from dossier.investigate.tools.firecrawl import crawl_seed_url
 
@@ -144,7 +143,7 @@ async def run_firecrawl(state: DossierState) -> dict:
 async def run_github_founder(state: DossierState) -> dict:
     founder = state.get("current_founder", "")
     if not founder:
-        return append_retrieved_chunks([])
+        return append_staged_sources([])
 
     from dossier.investigate.tools.github import fetch_founder_profile
 

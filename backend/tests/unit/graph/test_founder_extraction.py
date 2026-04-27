@@ -22,7 +22,7 @@ def _state(**overrides: Any) -> dict:
         "should_regather": False,
         "targeted_sections": [],
         "founder_candidates": [],
-        "retrieved_chunks": [],
+        "staged_sources": [],
         "draft_claims": [],
         "grounded_claims": [],
     }
@@ -140,31 +140,35 @@ def test_empty_founders_array_returns_empty_list() -> None:
 
 
 def test_prompt_includes_company_and_urls() -> None:
-    """No raw text in prompt — chunk URLs only."""
-    from dossier.investigate.graph.state import RetrievedChunkRef
+    """No raw text in prompt — source URLs only."""
+    from datetime import datetime, timezone
+
+    from dossier.investigate.graph.state import StagedSourceRef
 
     client = _FakeClient(parsed=FounderCandidates(founders=[]))
-    chunks = [
-        RetrievedChunkRef(
-            chunk_id="",
-            source_id="",
+    sources = [
+        StagedSourceRef(
             url="https://acme.ai/about",
             source_kind="web",
-            char_start=0,
-            char_end=100,
+            text="about",
+            title=None,
+            fetched_at=datetime.now(timezone.utc),
+            raw_metadata={},
             section_hint="general",
+            pass_index=0,
         ),
-        RetrievedChunkRef(
-            chunk_id="",
-            source_id="",
+        StagedSourceRef(
             url="https://news.example.com/acme",
             source_kind="news",
-            char_start=0,
-            char_end=100,
+            text="news",
+            title=None,
+            fetched_at=datetime.now(timezone.utc),
+            raw_metadata={},
             section_hint="general",
+            pass_index=0,
         ),
     ]
-    state = _state(company="Acme Co", retrieved_chunks=chunks)
+    state = _state(company="Acme Co", staged_sources=sources)
     asyncio.run(founder_extraction.run(state, client=client))
 
     user_msg = next(m for m in client.captured_messages if m["role"] == "user")
@@ -174,7 +178,7 @@ def test_prompt_includes_company_and_urls() -> None:
 
 
 def test_prompt_handles_no_urls_gracefully() -> None:
-    """Empty retrieved_chunks → prompt still well-formed."""
+    """Empty staged_sources → prompt still well-formed."""
     client = _FakeClient(parsed=FounderCandidates(founders=[]))
     asyncio.run(founder_extraction.run(_state(), client=client))
     user_msg = next(m for m in client.captured_messages if m["role"] == "user")
@@ -187,5 +191,4 @@ def test_context_hint_included_when_present() -> None:
     asyncio.run(founder_extraction.run(state, client=client))
     user_msg = next(m for m in client.captured_messages if m["role"] == "user")
     assert "Seed-stage fintech pitch" in user_msg["content"]
-
 

@@ -6,10 +6,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Module-level so warm Lambda invocations reuse the pool + checkpointer.
-# _event_loop is also cached: asyncio.run() destroys its loop after each call,
-# which invalidates the asyncio.Lock objects inside AsyncConnectionPool and causes
-# "bound to a different event loop" on the second warm invocation.
 _pool: Any = None
 _checkpointer: Any = None
 _event_loop: asyncio.AbstractEventLoop | None = None
@@ -21,7 +17,6 @@ def _get_event_loop() -> asyncio.AbstractEventLoop:
     if _event_loop is None or _event_loop.is_closed():
         _event_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(_event_loop)
-        # The pool/checkpointer were bound to the old loop — must re-initialise.
         _pool = None
         _checkpointer = None
     return _event_loop
@@ -130,7 +125,7 @@ async def run_graph(investigation_id: str) -> None:
             "should_regather": False,
             "targeted_sections": [],
             "founder_candidates": [],
-            "retrieved_chunks": [],
+            "staged_sources": [],
             "draft_claims": [],
             "grounded_claims": [],
         }

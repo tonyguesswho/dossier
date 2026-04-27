@@ -1,8 +1,6 @@
 from __future__ import annotations
-# Annotated[list[X], add] makes parallel Send branches concatenate safely.
-# Nodes mutate via state_accessors.{append_*, set_*}, never raw dicts.
-# Raw source text MUST NOT enter state — chunk refs only; text lives in source_chunks/S3.
 
+from datetime import datetime
 from operator import add
 from typing import Annotated, TypedDict
 
@@ -18,14 +16,15 @@ class FounderCandidates(BaseModel):
     founders: list[FounderCandidate]
 
 
-class RetrievedChunkRef(BaseModel):
-    chunk_id: str
-    source_id: str
+class StagedSourceRef(BaseModel):
     url: str
     source_kind: str  # 'web'|'github'|'news'|'crawl'|'crunchbase'
-    char_start: int
-    char_end: int
+    text: str
+    title: str | None = None
+    fetched_at: datetime
+    raw_metadata: dict[str, object]
     section_hint: str
+    pass_index: int
 
 
 class DraftClaimRef(BaseModel):
@@ -58,7 +57,7 @@ class DossierState(TypedDict):
 
     # Additive — parallel Send branches concatenate.
     founder_candidates: Annotated[list[str], add]
-    retrieved_chunks: Annotated[list[RetrievedChunkRef], add]
+    staged_sources: Annotated[list[StagedSourceRef], add]
     draft_claims: Annotated[list[DraftClaimRef], add]
     grounded_claims: Annotated[list[GroundedClaimRef], add]
 
@@ -67,7 +66,7 @@ __all__ = [
     "DossierState",
     "FounderCandidates",
     "FounderCandidate",
-    "RetrievedChunkRef",
+    "StagedSourceRef",
     "DraftClaimRef",
     "GroundedClaimRef",
 ]
