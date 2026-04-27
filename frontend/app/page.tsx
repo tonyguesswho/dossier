@@ -40,23 +40,17 @@ export default function Home() {
             {/* Left: Statement + fact rows + CTA */}
             <div className="flex flex-col gap-10">
               <div className="flex flex-col gap-5">
-                <p
-                  className="font-mono text-[11px] text-muted-foreground uppercase tracking-[0.15em] animate-fade-up motion-reduce:animate-none"
-                  style={{ animationDelay: "0ms" }}
-                >
-                  Seed-stage · First-meeting prep
-                </p>
                 <h1
                   className="font-display font-normal text-[3rem] sm:text-[3.75rem] leading-[1.04] tracking-[-0.01em] text-foreground animate-fade-up motion-reduce:animate-none"
-                  style={{ animationDelay: "80ms" }}
+                  style={{ animationDelay: "40ms" }}
                 >
-                  Know the company<br />before you walk in.
+                  Know the company<br />before the call.
                 </h1>
                 <p
                   className="text-[15px] text-muted-foreground leading-relaxed max-w-[26rem] animate-fade-up motion-reduce:animate-none"
-                  style={{ animationDelay: "160ms" }}
+                  style={{ animationDelay: "140ms" }}
                 >
-                  Paste a name, URL, or pitch deck. Two to four minutes later:
+                  Paste a name, URL, or pitch deck. A few minutes later:
                   a one-page brief where every claim links to the exact sentence it came from.
                   No hallucinations. No summaries without sources.
                 </p>
@@ -224,7 +218,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="h-12 flex items-center justify-center px-6 border-t border-border">
         <p className="text-xs text-muted-foreground">
-          Dossier · Cited-OSINT for seed-stage first meetings
+          Dossier · Cited company research in minutes
         </p>
       </footer>
     </div>

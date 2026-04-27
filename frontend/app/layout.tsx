@@ -41,7 +41,7 @@ const dmSerifDisplay = DM_Serif_Display({
 
 export const metadata: Metadata = {
   title: "Dossier",
-  description: "Cited-OSINT AI investigation agent for seed-stage VC first-meeting prep.",
+  description: "Paste a company name, URL, or pitch deck. Get a cited one-page brief in minutes — every claim linked to its source.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
