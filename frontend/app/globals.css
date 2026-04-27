@@ -22,7 +22,7 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
 
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.511 0.262 276.97);   /* indigo-600 (#4f46e5) */
   --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.97 0 0);
@@ -67,6 +67,10 @@
 }
 
 @layer base {
+  /* 3px indigo accent at the very top — editorial "magazine" mark */
+  html {
+    border-top: 3px solid var(--color-accent);
+  }
   * {
     border-color: var(--border);
   }
@@ -86,9 +90,13 @@
  * utility classes — e.g. text-display, leading-body, font-sans map here.
  */
 @theme {
-  /* Typography — Geist */
-  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "Cascadia Code", monospace;
+  /* Typography — Geist + DM Serif Display for display headings */
+  --font-sans:    "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:    "Geist Mono", ui-monospace, "Cascadia Code", monospace;
+  --font-display: "DM Serif Display", Georgia, serif;
+
+  /* Entrance animation — use animate-fade-up + motion-reduce:animate-none */
+  --animate-fade-up: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 
   /* Type scale */
   --text-display:    1.875rem; /* 30px */
@@ -116,12 +124,35 @@
   --color-card:        #ffffff;
   --color-border:      #e7e5e4;
   --color-foreground:  #1c1917;
-  --color-muted:       #78716c;
   --color-accent:      #4f46e5;
   --color-success:     #16a34a;
   --color-warning:     #d97706;
   --color-destructive: #dc2626;
   --color-quote-bg:    #fef3c7; /* RESERVED — Phase 4 citation hover only. DO NOT use in Phase 2. */
+}
+
+/* === Keyframes ===
+ * fade-up: used by animate-fade-up on landing page entrance.
+ * pulse-dot: used by .step-dot-active on the current pipeline step indicator.
+ * Both respect prefers-reduced-motion via motion-reduce:animate-none (Tailwind)
+ * or the explicit @media rule below.
+ */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.511 0.262 276.97 / 0.35); }
+  50%       { box-shadow: 0 0 0 6px oklch(0.511 0.262 276.97 / 0); }
+}
+
+.step-dot-active {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-dot-active { animation: none; }
 }
 
 /* === UI-SPEC §Prose Override ===
@@ -141,10 +172,11 @@
   line-height: var(--leading-body);
 }
 .prose-brief h2 {
+  font-family: var(--font-display);
   font-size: var(--text-heading);
   line-height: var(--leading-heading);
-  letter-spacing: var(--tracking-heading);
-  font-weight: 600;
+  letter-spacing: -0.005em;
+  font-weight: 400;
   margin-top: 2rem;
   margin-bottom: 0.75rem;
 }

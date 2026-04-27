@@ -23,28 +23,10 @@ import { Button } from "@/components/ui/button";
 export function BriefActions({ briefMarkdown }: { briefMarkdown: string }) {
   async function onCopy() {
     try {
-      if (
-        typeof navigator !== "undefined" &&
-        navigator.clipboard &&
-        typeof window !== "undefined" &&
-        window.isSecureContext
-      ) {
-        await navigator.clipboard.writeText(briefMarkdown);
-      } else {
-        // Fallback for localhost-http contexts where Clipboard API is gated.
-        const ta = document.createElement("textarea");
-        ta.value = briefMarkdown;
-        ta.setAttribute("readonly", "");
-        ta.style.position = "absolute";
-        ta.style.left = "-9999px";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
-      }
+      await navigator.clipboard.writeText(briefMarkdown);
       toast.success("Copied to clipboard");
     } catch {
-      toast.error("Copy failed — try selecting the text manually.");
+      toast.error("Copy failed — select the text manually and use Cmd/Ctrl+C.");
     }
   }
 

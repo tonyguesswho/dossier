@@ -11,6 +11,7 @@
 //     same route as running — just a different branch of this component.
 import { AlertCircle } from "lucide-react";
 import Link from "next/link";
+import { Fragment } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -53,7 +54,7 @@ export function RunningState({
         data-no-print
       >
         <AlertCircle className="h-8 w-8 text-destructive" aria-hidden />
-        <h1 className="text-[30px] font-semibold">Investigation failed</h1>
+        <h1 className="font-display font-normal text-[2rem] leading-[1.1]">Investigation failed</h1>
         <p className="text-[15px] text-muted-foreground max-w-md">
           {displayName} could not be researched — try a different name or URL.
         </p>
@@ -81,36 +82,50 @@ export function RunningState({
       <div
         role="status"
         aria-label={`Investigating ${displayName}`}
-        className="h-10 w-10 rounded-full border-4 animate-spin"
-        style={{ borderColor: "#4f46e5", borderTopColor: "transparent" }}
+        className="h-10 w-10 rounded-full border-4 border-primary [border-top-color:transparent] animate-spin motion-reduce:animate-none"
       />
-      <h1 className="text-[30px] font-semibold">Investigating {displayName}…</h1>
+      <h1 className="font-display font-normal text-[2rem] leading-[1.1]">Investigating {displayName}…</h1>
       <p className="text-[15px] text-muted-foreground">{STATUS_TO_LABEL[status]}</p>
 
-      <ol role="list" className="flex gap-8 mt-4 flex-wrap justify-center">
+      <ol className="flex items-center mt-6">
         {STEP_ORDER.map((step, i) => {
           const isCurrent = i === idx;
           const isDone = i < idx;
+          const isLast = i === STEP_ORDER.length - 1;
           return (
-            <li
-              role="listitem"
-              aria-current={isCurrent ? "step" : undefined}
-              key={step.key}
-              className="flex flex-col items-center gap-1"
-            >
-              <span
-                className={cn(
-                  "h-3 w-3 rounded-full",
-                  isCurrent
-                    ? "bg-[#4f46e5]"
-                    : isDone
-                      ? "bg-stone-400"
-                      : "border border-stone-300",
-                )}
-                aria-hidden
-              />
-              <span className="text-[13px] text-muted-foreground">{step.label}</span>
-            </li>
+            <Fragment key={step.key}>
+              <li
+                aria-current={isCurrent ? "step" : undefined}
+                className="flex flex-col items-center gap-1.5"
+              >
+                <span
+                  className={cn(
+                    "h-2.5 w-2.5 rounded-full transition-all duration-500",
+                    isCurrent
+                      ? "bg-primary step-dot-active"
+                      : isDone
+                        ? "bg-primary/50"
+                        : "border border-stone-300 bg-background",
+                  )}
+                  aria-hidden
+                />
+                <span className={cn(
+                  "text-[12px] whitespace-nowrap transition-colors",
+                  isCurrent ? "text-foreground font-medium" : "text-muted-foreground",
+                )}>
+                  {step.label}
+                </span>
+              </li>
+              {!isLast && (
+                <div
+                  className={cn(
+                    "h-px w-10 sm:w-14 shrink-0 mb-[18px] mx-1 transition-colors duration-500",
+                    isDone ? "bg-primary/40" : "bg-border",
+                  )}
+                  aria-hidden
+                />
+              )}
+            </Fragment>
           );
         })}
       </ol>

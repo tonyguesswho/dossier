@@ -95,11 +95,11 @@ export default function InvestigationDetailPage({
     return (
       <main className="max-w-xl mx-auto px-4 py-20 text-center flex flex-col items-center gap-4">
         <FileX className="h-8 w-8 text-muted-foreground" aria-hidden />
-        <h1 className="text-[30px] font-semibold">Investigation not found</h1>
+        <h1 className="font-display font-normal text-[2rem] leading-[1.1]">Investigation not found</h1>
         <p className="text-[15px] text-muted-foreground">
           This investigation doesn&apos;t exist or you don&apos;t have access to it.
         </p>
-        <Button asChild style={{ backgroundColor: "#4f46e5", color: "white" }}>
+        <Button asChild>
           <Link href="/investigations">Back to library</Link>
         </Button>
       </main>
@@ -143,9 +143,11 @@ export default function InvestigationDetailPage({
         className="sticky top-0 z-40 h-14 flex items-center justify-between px-4 bg-card border-b border-border"
         data-no-print
       >
-        <Link href="/investigations" className="text-[16px] font-semibold">
-          Dossier
-        </Link>
+        <nav aria-label="Main navigation">
+          <Link href="/investigations" className="text-[16px] font-semibold">
+            Dossier
+          </Link>
+        </nav>
       </header>
       <RunningState
         displayName={statusQuery.data.display_name}

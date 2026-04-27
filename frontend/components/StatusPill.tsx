@@ -47,7 +47,6 @@ export function StatusPill({
     <Badge
       className={cn("border-none", className)}
       style={{ backgroundColor: s.bg, color: s.fg }}
-      aria-label={`status: ${STATUS_COPY[status]}`}
     >
       {label ?? STATUS_COPY[status]}
     </Badge>

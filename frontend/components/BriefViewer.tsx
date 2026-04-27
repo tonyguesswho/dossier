@@ -26,28 +26,18 @@ import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { relativeTime } from "@/lib/utils";
 import { BriefActions } from "@/components/BriefActions";
 import { Scorecard } from "@/components/Scorecard";
 import { SourcesPanel } from "@/components/SourcesPanel";
 import { Button } from "@/components/ui/button";
 import type { BriefResponse } from "@/lib/types";
 
-function relativeTime(iso: string): string {
-  const ms = Date.now() - Date.parse(iso);
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 export function BriefViewer({ brief }: { brief: BriefResponse }) {
   return (
     <>
       <section
-        className="bg-card border-b border-border px-4 py-6"
+        className="bg-card border-b border-border px-4 py-6 animate-fade-up motion-reduce:animate-none"
         data-no-print
       >
         <div className="max-w-3xl mx-auto flex flex-col gap-4">
@@ -58,14 +48,16 @@ export function BriefViewer({ brief }: { brief: BriefResponse }) {
             <BriefActions briefMarkdown={brief.brief_markdown} />
           </div>
           <div>
-            <h1 className="text-[30px] font-semibold leading-none">
+            <h1 className="font-display font-normal text-[2.25rem] leading-[1.08] tracking-tight">
               {brief.display_name}
             </h1>
+            {/* Decorative accent rule — marks the brief title as the primary subject */}
+            <div className="w-10 h-[2px] bg-primary mt-3 mb-3" aria-hidden />
             {/*
               .brief-meta is the hook the @media print block in app/globals.css uses
               to reduce subtitle size to 9pt on the PDF (UI-SPEC §8 Print stylesheet).
             */}
-            <p className="brief-meta text-[13px] text-muted-foreground mt-2">
+            <p className="brief-meta text-[13px] text-muted-foreground">
               One-page brief ·{" "}
               {brief.completed_at ? relativeTime(brief.completed_at) : "just now"}
             </p>

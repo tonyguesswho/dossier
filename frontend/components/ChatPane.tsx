@@ -25,7 +25,7 @@
 //     the GET /chat is cheap enough that on page navigation a fresh fetch wins.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Send } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -166,6 +166,8 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
 
         <div
           ref={scrollRef}
+          aria-live="polite"
+          aria-relevant="additions"
           className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1 mb-3"
         >
           {historyQuery.isLoading && messages.length === 0 && (
@@ -208,7 +210,6 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
             <Button
               type="submit"
               disabled={!draft.trim() || turnMutation.isPending}
-              style={{ backgroundColor: "#4f46e5", color: "white" }}
             >
               {turnMutation.isPending ? (
                 <>
@@ -229,7 +230,7 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
     <div
@@ -257,4 +258,4 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </div>
   );
-}
+});

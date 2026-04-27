@@ -24,15 +24,17 @@ export default function InvestigationsPage() {
         className="sticky top-0 z-40 h-14 flex items-center justify-between px-4 bg-card border-b border-border"
         data-no-print
       >
-        <Link href="/investigations" className="text-[16px] font-semibold">
-          Dossier
-        </Link>
-        <Button asChild style={{ backgroundColor: "#4f46e5", color: "white" }}>
-          <Link href="/investigations/new">+ New Investigation</Link>
-        </Button>
+        <nav aria-label="Main navigation" className="contents">
+          <Link href="/investigations" className="text-[16px] font-semibold">
+            Dossier
+          </Link>
+          <Button asChild>
+            <Link href="/investigations/new">+ New Investigation</Link>
+          </Button>
+        </nav>
       </header>
       <main className="max-w-3xl mx-auto px-4 py-8">
-        <h1 className="text-[20px] font-semibold mb-4">Investigations</h1>
+        <h1 className="font-display font-normal text-[1.75rem] leading-tight mb-5">Investigations</h1>
         <LibraryList />
       </main>
       <Toaster position="bottom-right" />

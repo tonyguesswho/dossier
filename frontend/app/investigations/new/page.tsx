@@ -16,12 +16,14 @@ export default function NewInvestigationPage() {
         className="sticky top-0 z-40 h-14 flex items-center justify-between px-4 bg-card border-b border-border"
         data-no-print
       >
-        <Link href="/investigations" className="text-[16px] font-semibold">
-          Dossier
-        </Link>
-        <Button asChild variant="ghost">
-          <Link href="/investigations">Back to library</Link>
-        </Button>
+        <nav aria-label="Main navigation" className="contents">
+          <Link href="/investigations" className="text-[16px] font-semibold">
+            Dossier
+          </Link>
+          <Button asChild variant="ghost">
+            <Link href="/investigations">Back to library</Link>
+          </Button>
+        </nav>
       </header>
       <main className="max-w-2xl mx-auto px-4 py-12">
         <h1 className="text-[20px] font-semibold mb-6">New Investigation</h1>

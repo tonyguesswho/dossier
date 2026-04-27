@@ -35,21 +35,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { cn } from "@/lib/utils";
+import { cn, relativeTime } from "@/lib/utils";
 import type { InvestigationListItem, InvestigationListResponse } from "@/lib/types";
 
 const LIST_REFETCH_MS = 5_000;
-
-function relativeTime(iso: string): string {
-  const ms = Date.now() - Date.parse(iso);
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 async function fetchList(): Promise<InvestigationListResponse> {
   const res = await fetch("/api/investigations", { cache: "no-store" });
@@ -147,11 +136,11 @@ export function LibraryList() {
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center text-center gap-4 py-20">
-        <h2 className="text-[30px] font-semibold">No investigations yet</h2>
+        <h2 className="font-display font-normal text-[2rem] leading-[1.1]">No investigations yet</h2>
         <p className="text-[15px] text-muted-foreground max-w-md">
           Run your first investigation to get a one-page brief in 2–4 minutes.
         </p>
-        <Button asChild style={{ backgroundColor: "#4f46e5", color: "white" }}>
+        <Button asChild>
           <Link href="/investigations/new">Investigate</Link>
         </Button>
       </div>
@@ -164,13 +153,8 @@ export function LibraryList() {
         {items.map((item) => (
           <li
             key={item.id}
-            role="row"
-            tabIndex={0}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") router.push(`/investigations/${item.id}`);
-            }}
             className={cn(
-              "flex items-center gap-4 px-4 h-[52px] hover:bg-stone-50 cursor-pointer",
+              "flex items-center gap-4 px-4 h-[52px] hover:bg-stone-50",
             )}
           >
             {renameId === item.id ? (

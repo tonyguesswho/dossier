@@ -33,7 +33,7 @@ export function SourcesPanel({ sources }: { sources: SourceListItem[] }) {
                 href={s.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="font-mono text-[13px] text-muted-foreground truncate max-w-[80ch]"
+                className="font-mono text-[13px] text-muted-foreground truncate max-w-full"
               >
                 {s.url}
               </a>

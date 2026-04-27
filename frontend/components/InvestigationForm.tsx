@@ -22,7 +22,7 @@
 //     without UX payoff; tabbing one form is the minimum viable affordance.
 import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
@@ -112,9 +112,25 @@ export function InvestigationForm() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const tabs: Mode[] = ["text", "deck"];
+
   const switchMode = (next: Mode) => {
     setMode(next);
     setError(null);
+  };
+
+  const onTabKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next = -1;
+    if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    if (next !== -1) {
+      e.preventDefault();
+      switchMode(tabs[next]);
+      tabRefs.current[next]?.focus();
+    }
   };
 
   const submitText = async (): Promise<void> => {
@@ -231,10 +247,15 @@ export function InvestigationForm() {
         className="flex gap-1 rounded-md border border-border p-1 bg-muted/40"
       >
         <button
+          ref={(el) => { tabRefs.current[0] = el; }}
           type="button"
           role="tab"
+          id="tab-text"
           aria-selected={mode === "text"}
+          aria-controls="panel-text"
+          tabIndex={mode === "text" ? 0 : -1}
           onClick={() => switchMode("text")}
+          onKeyDown={(e) => onTabKeyDown(e, 0)}
           className={`flex-1 h-9 rounded-sm text-[13px] font-medium transition-colors ${
             mode === "text"
               ? "bg-background shadow-sm"
@@ -244,10 +265,15 @@ export function InvestigationForm() {
           Company name / URL
         </button>
         <button
+          ref={(el) => { tabRefs.current[1] = el; }}
           type="button"
           role="tab"
+          id="tab-deck"
           aria-selected={mode === "deck"}
+          aria-controls="panel-deck"
+          tabIndex={mode === "deck" ? 0 : -1}
           onClick={() => switchMode("deck")}
+          onKeyDown={(e) => onTabKeyDown(e, 1)}
           className={`flex-1 h-9 rounded-sm text-[13px] font-medium transition-colors ${
             mode === "deck"
               ? "bg-background shadow-sm"
@@ -258,53 +284,61 @@ export function InvestigationForm() {
         </button>
       </div>
 
-      {mode === "text" ? (
-        <div key="text-input" className="flex flex-col gap-1">
-          <label htmlFor="value" className="text-[15px] font-semibold">
-            Company name or URL
-          </label>
-          <Input
-            key="input-text"
-            id="value"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder="Stripe  •  https://stripe.com  •  acme.com"
-            maxLength={200}
-            aria-describedby={error ? "form-error" : undefined}
-            autoFocus
-          />
-        </div>
-      ) : (
-        <div key="deck-input" className="flex flex-col gap-1">
-          <label htmlFor="deck" className="text-[15px] font-semibold">
-            Pitch deck (PDF)
-          </label>
-          {/*
-            Native <input type="file"> (not shadcn's <Input>) — the shadcn wrapper
-            mangled the native "Choose File" button height so it wasn't clickable.
-            Native rendering differs per OS/browser but always produces a working
-            file chooser.
-          */}
-          <input
-            key="input-file"
-            id="deck"
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            aria-describedby={error ? "form-error" : "deck-help"}
-            className="block w-full cursor-pointer rounded-md border border-input bg-transparent text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-3 file:py-2 file:text-[13px] file:font-medium file:text-foreground hover:file:bg-muted/80"
-          />
-          {file && (
-            <p className="text-[13px] text-muted-foreground mt-1">
-              Selected: <span className="font-medium text-foreground">{file.name}</span> ({Math.round(file.size / 1024)} KB)
-            </p>
-          )}
-          <p id="deck-help" className="text-[13px] text-muted-foreground mt-1">
-            PDF, under 17 MB. Text is extracted via MarkItDown — image-only scans
-            aren&apos;t supported yet.
+      <div
+        role="tabpanel"
+        id="panel-text"
+        aria-labelledby="tab-text"
+        hidden={mode !== "text"}
+        className="flex flex-col gap-1"
+      >
+        <label htmlFor="value" className="text-[15px] font-semibold">
+          Company name or URL
+        </label>
+        <Input
+          id="value"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Stripe  •  https://stripe.com  •  acme.com"
+          maxLength={200}
+          aria-describedby={error ? "form-error" : undefined}
+          autoFocus
+        />
+      </div>
+
+      <div
+        role="tabpanel"
+        id="panel-deck"
+        aria-labelledby="tab-deck"
+        hidden={mode !== "deck"}
+        className="flex flex-col gap-1"
+      >
+        <label htmlFor="deck" className="text-[15px] font-semibold">
+          Pitch deck (PDF)
+        </label>
+        {/*
+          Native <input type="file"> (not shadcn's <Input>) — the shadcn wrapper
+          mangled the native "Choose File" button height so it wasn't clickable.
+          Native rendering differs per OS/browser but always produces a working
+          file chooser.
+        */}
+        <input
+          id="deck"
+          type="file"
+          accept="application/pdf,.pdf"
+          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+          aria-describedby={error ? "form-error" : "deck-help"}
+          className="block w-full cursor-pointer rounded-md border border-input bg-transparent text-sm file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-muted file:px-3 file:py-2 file:text-[13px] file:font-medium file:text-foreground hover:file:bg-muted/80"
+        />
+        {file && (
+          <p className="text-[13px] text-muted-foreground mt-1">
+            Selected: <span className="font-medium text-foreground">{file.name}</span> ({Math.round(file.size / 1024)} KB)
           </p>
-        </div>
-      )}
+        )}
+        <p id="deck-help" className="text-[13px] text-muted-foreground mt-1">
+          PDF, under 17 MB. Text is extracted via MarkItDown — image-only scans
+          aren&apos;t supported yet.
+        </p>
+      </div>
 
       <div className="flex flex-col gap-1">
         <label htmlFor="hint" className="text-[15px] font-semibold">
@@ -322,7 +356,7 @@ export function InvestigationForm() {
       </div>
 
       {error && (
-        <p id="form-error" className="text-[13px] text-destructive -mt-2">
+        <p id="form-error" role="alert" className="text-[13px] text-destructive -mt-2">
           {error}
         </p>
       )}
@@ -330,7 +364,6 @@ export function InvestigationForm() {
       <Button
         type="submit"
         className="w-full h-10"
-        style={{ backgroundColor: "#4f46e5", color: "white" }}
         disabled={submitting}
       >
         {submitting ? (

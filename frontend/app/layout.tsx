@@ -14,7 +14,7 @@
 //   - QueryProvider per page: duplicates client instantiation.
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Geist, Geist_Mono } from "next/font/google";
+import { DM_Serif_Display, Geist, Geist_Mono } from "next/font/google";
 
 import { QueryProvider } from "@/lib/query-provider";
 import "./globals.css";
@@ -28,6 +28,14 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
+  display: "swap",
+});
+
+const dmSerifDisplay = DM_Serif_Display({
+  subsets: ["latin"],
+  weight: ["400"],
+  style: ["normal", "italic"],
+  variable: "--font-display",
   display: "swap",
 });
 
@@ -47,7 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         },
       }}
     >
-      <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${dmSerifDisplay.variable}`}>
         <body>
           <QueryProvider>{children}</QueryProvider>
         </body>
