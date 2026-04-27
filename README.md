@@ -10,6 +10,19 @@ Backend on AWS Lambda, frontend on AWS Amplify.
 
 ---
 
+## Screenshots
+
+**Cited brief** — every claim links to a verbatim source span
+![Brief with citations](docs/screenshots/01-brief.png)
+
+**Source panel** — 27 sources gathered across Exa, GitHub, Firecrawl, NewsAPI, Crunchbase
+![Sources panel](docs/screenshots/02-sources.png)
+
+**Grounded chat** — follow-up answers stay cited to the same corpus
+![Chat pane](docs/screenshots/03-chat.png)
+
+---
+
 ## The problem it solves
 
 Seed-stage VC partners spend 30–60 minutes Googling before every first meeting — pulling founder backgrounds, funding history, product positioning, and news. The output is a patchwork of browser tabs with no citations you can trust after the fact.
