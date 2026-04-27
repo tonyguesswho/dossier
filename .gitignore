@@ -1,5 +1,6 @@
-# Planning (locally owned, per CLAUDE.md)
+# Planning & internal docs (local only)
 .planning/
+CLAUDE.md
 
 # Python
 __pycache__/
