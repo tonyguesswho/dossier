@@ -31,18 +31,6 @@ Dossier compresses that research into a structured one-pager where **every claim
 
 ---
 
-## What makes it non-trivial
-
-Three things that separate this from a "call an LLM with search results" wrapper:
-
-**1. Deterministic grounding.** `ground.py` does a normalized substring match between each proposed claim's `quoted_span` and the source chunk text. No match → claim is silently dropped. The eval harness scores `citation_precision` over the accepted set — it's been 100% across every investigation run.
-
-**2. Eval harness.** A held-out set of 8 companies with a CLI scorer (`dossier.eval.report`). Grounding rate and precision are computed deterministically from the database — no LLM judge, no vibes.
-
-**3. LangGraph reflection loop.** After the synthesizer drafts the brief, a `verifier` node checks for missing sections and weak citations. If coverage is below threshold it routes back to the planner for a targeted re-gather. Capped at 2 reflections to bound cost.
-
----
-
 ## Eval numbers
 
 Run it yourself: `cd backend && uv run python -m dossier.eval.report`
@@ -60,6 +48,18 @@ Run it yourself: `cd backend && uv run python -m dossier.eval.report`
 | **Aggregate** | **234** | **194** | **82.9%** | **100.0%** |
 
 **How to read this:** the synthesizer proposes ~30 claims per investigation. The grounder accepts ~83% on average. Of the accepted set, every quoted span is byte-identical to a substring of the cited source chunk. "Drop rather than fabricate" is the design posture.
+
+---
+
+## Under the hood
+
+Most "cited AI" tools hallucinate the citation and hope you don't check. Dossier is built so you can check — and it'll pass.
+
+**Citations are verified before they leave the system.** The synthesizer outputs each claim with a `quoted_span` — the exact text it's sourcing from. Before anything reaches the database, `ground.py` runs a normalized substring match against the raw source chunk. If the span isn't in there, the claim is dropped. Not flagged, not softened — dropped. That's why precision is 100%: the only claims that make it through are the ones that can be proven.
+
+**The eval harness exists so this isn't just a claim.** Eight companies, scored deterministically from the database with a CLI tool (`dossier.eval.report`). No LLM judge scoring vibes — just byte-level substring matches counted up. You can run it yourself in 30 seconds.
+
+**The graph self-corrects.** After the synthesizer drafts the brief, a verifier node checks section coverage and citation density. If anything is thin, it routes back to the planner with a list of targeted gaps — not a full re-run, just a second gather pass for the weak spots. The loop is capped at 2 reflections so cost stays bounded. The result is a brief that's harder to poke holes in without running 4 minutes of compute to find out.
 
 ---
 
