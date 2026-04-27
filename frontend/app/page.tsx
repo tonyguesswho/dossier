@@ -83,9 +83,7 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="h-12 flex items-center justify-center px-6 border-t border-neutral-100">
-        <p className="text-xs text-neutral-400">
-          Built with Claude Sonnet · LangGraph · AWS Lambda
-        </p>
+        <p className="text-xs text-neutral-400">Dossier</p>
       </footer>
     </div>
   );
