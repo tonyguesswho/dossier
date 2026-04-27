@@ -4,7 +4,7 @@
 
 Drop a company name, URL, or pitch deck → get a one-page cited brief in 2–4 minutes. Every factual claim links back to the exact sentence it came from. After the brief loads, a grounded chat pane lets you ask follow-up questions that stay cited to the same corpus.
 
-**Live demo → https://main.d30fatxfdws6s9.amplifyapp.com**
+**Live demo → https://main.d30fatxfdws6s9.amplifyapp.com** · [Sample exported brief (PDF)](docs/Dossier.pdf)
 
 Backend on AWS Lambda, frontend on AWS Amplify.
 
