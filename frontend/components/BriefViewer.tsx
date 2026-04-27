@@ -38,10 +38,9 @@ export function BriefViewer({ brief }: { brief: BriefResponse }) {
     <>
       <section
         className="bg-card border-b border-border px-4 py-6 animate-fade-up motion-reduce:animate-none"
-        data-no-print
       >
         <div className="max-w-3xl mx-auto flex flex-col gap-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center justify-between flex-wrap gap-2" data-no-print>
             <Button asChild variant="ghost" size="sm">
               <Link href="/investigations">← Back to library</Link>
             </Button>

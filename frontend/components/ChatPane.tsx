@@ -159,7 +159,7 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
   return (
     <section className="max-w-3xl mx-auto px-4 pb-12" data-no-print>
       <div className="border-t border-border pt-8">
-        <h2 className="text-[20px] font-semibold mb-1">Ask a follow-up</h2>
+        <h2 className="font-display font-normal text-[1.5rem] leading-tight mb-1">Ask a follow-up</h2>
         <p className="text-[13px] text-muted-foreground mb-4">
           Grounded in the sources above. Cmd/Ctrl+Enter to send.
         </p>
@@ -168,7 +168,7 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
           ref={scrollRef}
           aria-live="polite"
           aria-relevant="additions"
-          className="flex flex-col gap-3 max-h-[420px] overflow-y-auto pr-1 mb-3"
+          className="flex flex-col gap-5 max-h-[420px] overflow-y-auto pr-1 mb-3"
         >
           {historyQuery.isLoading && messages.length === 0 && (
             <p className="text-[13px] text-muted-foreground">Loading history…</p>
@@ -233,29 +233,25 @@ export function ChatPane({ investigationId }: { investigationId: string }) {
 const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
-    <div
-      className={`flex ${isUser ? "justify-end" : "justify-start"}`}
-    >
-      <div
-        className={`max-w-[85%] rounded-lg px-3 py-2 text-[14px] ${
-          isUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-muted text-foreground"
-        }`}
-      >
-        {isUser ? (
-          // User-authored text: render as-is, whitespace-preserved. NOT markdown
-          // — we do not want the user's `[S:...]` markers to render through,
-          // and rendering user-supplied markdown is a (minor) XSS surface.
+    <div className={`flex flex-col gap-1 ${isUser ? "items-end" : "items-start"}`}>
+      <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-wider px-1">
+        {isUser ? "You" : "Dossier"}
+      </span>
+      {isUser ? (
+        // User text: plain whitespace-preserved, not markdown — avoids XSS
+        // surface and prevents [S:...] grounding markers from rendering.
+        <div className="max-w-[80%] bg-primary text-primary-foreground rounded px-4 py-2.5 text-[14px]">
           <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : (
-          <div className="prose prose-sm max-w-none dark:prose-invert">
+        </div>
+      ) : (
+        <div className="w-full border-l-2 border-primary/30 pl-4">
+          <div className="prose prose-sm max-w-none text-[14px]">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {message.content}
             </ReactMarkdown>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 });

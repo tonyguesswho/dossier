@@ -205,43 +205,73 @@
  */
 @media print {
   header, nav, .no-print, [data-no-print] { display: none !important; }
+  /* Remove the top accent bar from the browser chrome */
+  html { border-top: none !important; }
   @page { margin: 1.5cm 2cm; size: A4; }
   body {
     background: white !important;
     color: #1c1917 !important;
     font-family: "Geist Sans", Georgia, serif;
-    font-size: 12pt;
-    line-height: 1.6;
+    font-size: 11pt;
+    line-height: 1.65;
   }
-  h1 { font-size: 20pt; font-weight: 600; margin-bottom: 4pt; }
+  /* Company name — uses display serif to match screen design */
+  h1 {
+    font-family: "DM Serif Display", Georgia, serif;
+    font-size: 26pt;
+    font-weight: 400;
+    line-height: 1.08;
+    letter-spacing: -0.01em;
+    margin-bottom: 4pt;
+  }
+  /* Section headings in prose — small caps treatment */
   h2 {
-    font-size: 13pt; font-weight: 600;
-    margin-top: 16pt; margin-bottom: 6pt;
+    font-size: 8pt;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 18pt;
+    margin-bottom: 5pt;
     border-bottom: 0.5pt solid #e7e5e4;
     padding-bottom: 3pt;
     page-break-after: avoid;
+    color: #78716c;
   }
   h3 {
-    font-size: 11pt; font-weight: 600;
-    margin-top: 10pt; margin-bottom: 4pt;
+    font-size: 10pt;
+    font-weight: 600;
+    margin-top: 10pt;
+    margin-bottom: 4pt;
     page-break-after: avoid;
   }
   h2 + p, h3 + p { page-break-before: avoid; }
   p { orphans: 3; widows: 3; margin-bottom: 6pt; }
+  /* Print full URL after source links in the Sources section only.
+     Inline citation superscripts (sup a) are suppressed — the Sources
+     section already covers them. */
   a[href]::after {
     content: " (" attr(href) ")";
-    font-size: 9pt;
+    font-size: 8pt;
     color: #78716c;
+    word-break: break-all;
   }
+  sup a::after { content: none !important; }
   nav a::after, .no-print a::after { content: none; }
+  /* Accent rule under the company name */
   .prose-brief { max-width: none !important; }
-  .brief-meta { font-size: 9pt; color: #78716c; margin-bottom: 12pt; }
+  /* Accent bar that sits under the h1 on screen — keep for print */
+  .w-10.h-\[2px\] { display: block !important; background: #4f46e5 !important; }
+  .brief-meta { font-size: 9pt; color: #78716c; margin-bottom: 10pt; }
+  /* Scorecard chips */
+  .rounded-full { border: 0.5pt solid #e7e5e4 !important; }
   details { display: block !important; }
   details > summary {
     font-weight: 600;
-    font-size: 11pt;
+    font-size: 10pt;
     margin-top: 16pt;
     list-style: none;
   }
   details > summary::marker { display: none; }
+  /* Inline citation superscripts — keep indigo, don't underline */
+  sup { color: #4f46e5; font-weight: 600; }
 }
