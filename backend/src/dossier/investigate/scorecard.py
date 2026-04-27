@@ -42,5 +42,3 @@ def compute_scorecard(rows: Iterable) -> dict | None:
         "grounded_claims": grounded,
     }
 
-
-__all__ = ["compute_scorecard"]

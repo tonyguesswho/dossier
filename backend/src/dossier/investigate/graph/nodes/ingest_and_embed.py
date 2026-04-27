@@ -224,5 +224,3 @@ async def run(state: DossierState) -> dict:
 
     return {}
 
-
-__all__ = ["run"]

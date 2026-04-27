@@ -28,5 +28,3 @@ class InvestigationInput:
     def with_value(self, value: str) -> "InvestigationInput":
         return InvestigationInput(value=value, context_hint=self.context_hint)
 
-
-__all__ = ["InvestigationInput"]

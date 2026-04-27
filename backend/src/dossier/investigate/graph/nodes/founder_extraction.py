@@ -113,5 +113,3 @@ async def run(state: DossierState, *, client: Any | None = None) -> dict:
     )
     return append_founder_candidates(names)
 
-
-__all__ = ["run"]

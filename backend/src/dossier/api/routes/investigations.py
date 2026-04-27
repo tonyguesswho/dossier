@@ -58,13 +58,12 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
 
 
 def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    # Read mode at call time so flipping the env var doesn't need a process restart.
+
     mode = get_settings().dispatch_mode
     if mode == "local":
         from dossier.investigate.graph.runner import run_graph_sync  # noqa: PLC0415
         background_tasks.add_task(run_graph_sync, str(investigation_id))
     elif mode == "lambda":
-        # Fire-and-forget self-invoke; Event returns immediately so POST stays under the 30s URL budget.
         import boto3  # noqa: PLC0415
         function_name = get_settings().lambda_function_name
         if not function_name:
@@ -121,7 +120,7 @@ def create_investigation(
     return CreateInvestigationResponse(id=investigation_id, status="queued")
 
 
-# 17 MB ≈ 98th percentile of real decks. octet-stream is accepted because curl without -H sends it.
+
 DECK_MAX_BYTES: int = 17 * 1024 * 1024
 DECK_MIN_BYTES: int = 100
 DECK_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
@@ -174,7 +173,7 @@ def upload_deck_investigation(
     repo.upsert_user(eng, clerk_user_id)
 
     investigation_id = uuid4()
-    # Use Haiku to extract subject — using filename pulled in unrelated companies during widen-search.
+
     extracted_company: str | None = None
     try:
         extracted_company = extract_company_from_markdown(markdown)
@@ -384,6 +383,3 @@ def re_run_investigation(
 
     _dispatch_pipeline(background_tasks, new_id)
     return ReRunResponse(id=new_id, status="queued")
-
-
-__all__ = ["router"]

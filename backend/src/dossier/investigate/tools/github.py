@@ -130,5 +130,3 @@ def fetch_founder_profile(founder_name: str, *, token: str | None = None) -> lis
 
         return [r for r in results if r.url]
 
-
-__all__ = ["GITHUB_API_BASE", "fetch_founder_profile", "read_github_env"]

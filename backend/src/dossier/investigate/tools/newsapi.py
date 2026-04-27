@@ -87,5 +87,3 @@ async def search(company: str, context_hint: str | None = None) -> list[ToolResu
     logger.info("newsapi.search: query=%r returned %d articles", query, len(results))
     return results
 
-
-__all__ = ["NEWSAPI_BASE_URL", "search"]

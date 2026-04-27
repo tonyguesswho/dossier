@@ -122,18 +122,3 @@ def embed(
         out.extend(d.embedding for d in resp.data)
     return out
 
-
-__all__ = [
-    "CHEAP_MODEL_ID",
-    "DEFAULT_EMBED_BATCH_SIZE",
-    "EMBEDDING_MODEL_ID",
-    "ModelAlias",
-    "OPENROUTER_BASE_URL",
-    "STRONG_MODEL_ID",
-    "completion",
-    "embed",
-    "embedding_client",
-    "strong_model",
-    "structured_call",
-    "structured_call_with_status",
-]

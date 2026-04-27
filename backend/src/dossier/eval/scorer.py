@@ -27,5 +27,3 @@ def citation_precision(claims: list[Claim], corpus: dict[str, str]) -> float:
 
     return hits / len(claims)
 
-
-__all__ = ["citation_precision"]

@@ -80,5 +80,3 @@ async def _verify_clerk_credentials(
 async def require_clerk_user_id(request: Request) -> str:
     return await _verify_clerk_credentials(request, None)
 
-
-__all__ = ["_verify_clerk_credentials", "require_clerk_user_id"]

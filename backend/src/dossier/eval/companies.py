@@ -136,5 +136,3 @@ def split_summary() -> dict[str, int]:
         "verticals": len(verticals),
     }
 
-
-__all__ = ["EVAL_COMPANIES", "EvalCompany", "split_summary"]

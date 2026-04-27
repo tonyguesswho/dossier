@@ -92,5 +92,3 @@ def retrieve_top_k(
         for row in rows
     ]
 
-
-__all__ = ["DEFAULT_TOP_K", "RetrievedChunk", "retrieve_top_k"]

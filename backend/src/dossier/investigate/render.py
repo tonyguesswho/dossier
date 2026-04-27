@@ -20,5 +20,3 @@ def brief_to_markdown(brief: Brief, url_by_chunk: dict[str, str]) -> str:
         out.append("")
     return "\n".join(out)
 
-
-__all__ = ["brief_to_markdown"]

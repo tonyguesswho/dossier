@@ -59,5 +59,3 @@ def handler(event: dict, context: Any) -> Any:
     logger.info("lambda_handler: dispatching to Mangum/FastAPI")
     return _mangum(event, context)
 
-
-__all__ = ["handler"]

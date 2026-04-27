@@ -177,5 +177,3 @@ def handler(event: dict, context: Any) -> dict:
     _get_event_loop().run_until_complete(run_graph(str(investigation_id)))
     return {"statusCode": 200, "body": "ok"}
 
-
-__all__ = ["handler", "run_graph"]

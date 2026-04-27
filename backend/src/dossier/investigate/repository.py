@@ -343,28 +343,3 @@ async def ainsert_injection_attempt(
         },
     )
 
-
-__all__ = [
-    "acomplete_investigation",
-    "aget_investigation_metadata",
-    "ainsert_injection_attempt",
-    "alist_grounded_claims",
-    "aupdate_status",
-    "aurl_by_chunk",
-    "claim_grounding_rows",
-    "count_claims",
-    "count_recent_24h",
-    "count_sources",
-    "delete_investigation_for_user",
-    "get_investigation_for_user",
-    "get_investigation_subject",
-    "insert_chat_turn_pair",
-    "insert_investigation",
-    "list_chat_messages",
-    "list_investigations_for_user",
-    "list_sources",
-    "mark_failed_with_error",
-    "update_input_ref",
-    "upsert_user",
-    "url_by_chunk",
-]

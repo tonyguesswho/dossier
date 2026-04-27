@@ -14,5 +14,3 @@ def normalize(text: str) -> str:
     collapsed = _WHITESPACE_RE.sub(" ", lowered)
     return collapsed.strip(_STRIP_CHARS)
 
-
-__all__ = ["normalize"]

@@ -91,5 +91,3 @@ async def run(state: DossierState) -> dict:
 
     return append_grounded_claims(grounded)
 
-
-__all__ = ["run"]

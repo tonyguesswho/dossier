@@ -91,5 +91,3 @@ def search(query: str, *, num_results: int = 8) -> list[ToolResult]:
         if r.get("url")  # can't cite without a URL
     ]
 
-
-__all__ = ["ExaSearchError", "read_exa_env", "search"]

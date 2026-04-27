@@ -118,5 +118,3 @@ async def search(company: str) -> list[ToolResult]:
         )
     ]
 
-
-__all__ = ["search"]

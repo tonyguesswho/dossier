@@ -70,16 +70,3 @@ def build_brief_from_grouped(
     # Missing fields default to []; new sections only need to touch BRIEF_SECTIONS above.
     return Brief(**{field: grouped.get(field, []) for field in BRIEF_FIELDS})
 
-
-__all__ = [
-    "BriefSection",
-    "BriefClaim",
-    "Brief",
-    "BRIEF_SECTIONS",
-    "BRIEF_FIELDS",
-    "BRIEF_DB_SECTIONS",
-    "FIELD_TO_DB",
-    "DB_TO_FIELD",
-    "section_headings",
-    "build_brief_from_grouped",
-]

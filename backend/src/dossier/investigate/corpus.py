@@ -92,12 +92,3 @@ def widen(
 
     return len(tagged)
 
-
-__all__ = [
-    "DEFAULT_TOP_K",
-    "RetrievedChunk",
-    "WIDEN_NUM_RESULTS",
-    "top_k",
-    "urls_by_chunk",
-    "widen",
-]
