@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections import defaultdict
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from dossier.investigate.tools.types import ToolResult
 
-from ..state import DossierState
+from ..state import DossierState, StagedSourceRef
 
 logger = logging.getLogger(__name__)
 
 
 class _ClassifierVerdict(BaseModel):
-    verdict: str  # 'clean' | 'injection'
+    verdict: Literal["clean", "injection"]
     reason: str
 
 
@@ -59,25 +58,25 @@ Classify the following chunk of retrieved web content.
 Return your verdict now."""
 
 
-# {investigation_id: {url: ToolResult}}. Re-gather passes overwrite by url.
-_TOOL_RESULT_CACHE: dict[str, dict[str, ToolResult]] = defaultdict(dict)
+def _staged_source_to_tool_result(source: StagedSourceRef) -> ToolResult:
+    return ToolResult(
+        url=source.url,
+        source_kind=source.source_kind,
+        text=source.text,
+        title=source.title,
+        fetched_at=source.fetched_at,
+        raw_metadata=source.raw_metadata,
+    )
 
 
-def cache_tool_result(investigation_id: str, result: ToolResult) -> None:
-    _TOOL_RESULT_CACHE[investigation_id][result.url] = result
-
-
-def _drain_cache(investigation_id: str) -> list[ToolResult]:
-    bucket = _TOOL_RESULT_CACHE.pop(investigation_id, None)
-    if not bucket:
-        return []
-    return list(bucket.values())
+def _dedupe_staged_sources(sources: list[StagedSourceRef]) -> list[StagedSourceRef]:
+    deduped: dict[str, StagedSourceRef] = {}
+    for source in sources:
+        deduped[source.url] = source
+    return list(deduped.values())
 
 
 async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tuple[str, str]:
-    # Fail-open on any error — a missed injection is bad, a stalled investigation is worse.
-    # MUST run outside a DB session: RDS Proxy pins connections that hold state across network calls.
-    # Do NOT truncate chunk_text — capping reintroduces a second-half escape gap.
     from dossier.core.llm import structured_call_with_status
 
     def _parse_sync() -> _ClassifierVerdict | tuple[str, str]:
@@ -96,47 +95,55 @@ async def _classify_chunk(chunk_text: str, *, client: Any | None = None) -> tupl
             temperature=0.0,
         )
         if refusal:
-            logger.warning("_classify_chunk: refusal — fail-open: %s", refusal)
-            return "clean", "classifier refusal — fail-open"
+            logger.warning("_classify_chunk: classifier refused: %s", refusal)
+            return "clean", "classifier refusal"
         if parsed is None:
-            logger.warning("_classify_chunk: parsed=None — fail-open")
-            return "clean", "classifier parse failure — fail-open"
+            logger.warning("_classify_chunk: classifier returned parsed=None")
+            return "clean", "classifier parse failure"
         return parsed
 
     try:
         result = await asyncio.to_thread(_parse_sync)
-    except Exception:  # noqa: BLE001 — fail-open
-        logger.warning("_classify_chunk: error — fail-open", exc_info=True)
-        return "clean", "classifier error — fail-open"
+    except Exception:  # noqa: BLE001
+        logger.warning("_classify_chunk: classifier error; treating chunk as clean", exc_info=True)
+        return "clean", "classifier error"
 
     if isinstance(result, tuple):
         return result
-    verdict = result.verdict.strip().lower()
-    reason = result.reason.strip()
-    if verdict not in ("clean", "injection"):
-        logger.warning("_classify_chunk: unknown verdict %r — fail-open", verdict)
-        return "clean", f"unknown verdict {verdict!r} — fail-open"
-    return verdict, reason
+    return result.verdict, result.reason
 
 
 async def run(state: DossierState) -> dict:
-    # Chunk → classify (no DB) → bulk write (single DB session) → clear cache.
     from dossier.core.db import get_async_session
     from dossier.investigate.ingest import _chunk_text, ingest_tool_results
 
     investigation_id_str = state["investigation_id"]
     investigation_uuid = UUID(investigation_id_str)
+    current_pass = state.get("reflection_count", 0)
 
-    results_to_ingest = _drain_cache(investigation_id_str)
-    if not results_to_ingest:
+    staged_sources = [
+        source
+        for source in state.get("staged_sources", [])
+        if source.pass_index == current_pass
+    ]
+    if not staged_sources:
         logger.warning(
-            "ingest_and_embed: empty cache for investigation_id=%s", investigation_id_str
+            "ingest_and_embed: no staged sources for investigation_id=%s pass=%d",
+            investigation_id_str,
+            current_pass,
         )
         return {}
 
+    results_to_ingest = [
+        _staged_source_to_tool_result(source)
+        for source in _dedupe_staged_sources(staged_sources)
+    ]
+
     logger.info(
-        "ingest_and_embed: draining %d cached result(s) for investigation_id=%s",
-        len(results_to_ingest), investigation_id_str,
+        "ingest_and_embed: classifying %d staged source(s) for investigation_id=%s pass=%d",
+        len(results_to_ingest),
+        investigation_id_str,
+        current_pass,
     )
 
     chunks_by_result: list[tuple[ToolResult, list[str]]] = []
@@ -144,7 +151,7 @@ async def run(state: DossierState) -> dict:
     for result in results_to_ingest:
         try:
             spans = _chunk_text(result.text)
-        except Exception:  # noqa: BLE001 — per-source fail-open
+        except Exception:  # noqa: BLE001
             logger.warning(
                 "ingest_and_embed: _chunk_text failed for url=%s", result.url, exc_info=True
             )
@@ -218,4 +225,4 @@ async def run(state: DossierState) -> dict:
     return {}
 
 
-__all__ = ["cache_tool_result", "run"]
+__all__ = ["run"]

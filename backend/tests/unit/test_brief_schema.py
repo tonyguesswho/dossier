@@ -12,25 +12,23 @@ from dossier.investigate.brief_schema import (
     Brief,
     BriefClaim,
     build_brief_from_grouped,
-    db_to_field,
-    field_to_db,
     section_headings,
 )
 
 
 def test_field_db_round_trip() -> None:
     for s in BRIEF_SECTIONS:
-        assert db_to_field(field_to_db(s.field)) == s.field
+        assert DB_TO_FIELD[FIELD_TO_DB[s.field]] == s.field
 
 
 def test_field_to_db_handles_the_only_renamed_section() -> None:
-    assert field_to_db("risk_flags") == "risk"
-    assert db_to_field("risk") == "risk_flags"
+    assert FIELD_TO_DB["risk_flags"] == "risk"
+    assert DB_TO_FIELD["risk"] == "risk_flags"
 
 
 def test_field_to_db_unknown_raises() -> None:
     with pytest.raises(KeyError):
-        field_to_db("not-a-real-field")
+        _ = FIELD_TO_DB["not-a-real-field"]
 
 
 def test_brief_fields_match_canonical_order() -> None:
@@ -38,11 +36,9 @@ def test_brief_fields_match_canonical_order() -> None:
     assert BRIEF_DB_SECTIONS == tuple(s.db_name for s in BRIEF_SECTIONS)
 
 
-def test_field_to_db_dict_matches_helpers() -> None:
+def test_field_to_db_dict_consistency() -> None:
     for field, db in FIELD_TO_DB.items():
-        assert field_to_db(field) == db
-    for db, field in DB_TO_FIELD.items():
-        assert db_to_field(db) == field
+        assert DB_TO_FIELD[db] == field
 
 
 def test_section_headings_returns_six_pairs_in_order() -> None:

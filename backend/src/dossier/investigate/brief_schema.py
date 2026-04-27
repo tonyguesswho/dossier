@@ -34,22 +34,11 @@ BRIEF_SECTIONS: tuple[_Section, ...] = (
     _Section("suggested_questions", "suggested_questions", "Suggested Questions"),
 )
 
-_BY_FIELD: dict[str, _Section] = {s.field: s for s in BRIEF_SECTIONS}
-_BY_DB: dict[str, _Section] = {s.db_name: s for s in BRIEF_SECTIONS}
-
 FIELD_TO_DB: dict[str, str] = {s.field: s.db_name for s in BRIEF_SECTIONS}
 DB_TO_FIELD: dict[str, str] = {s.db_name: s.field for s in BRIEF_SECTIONS}
 
 BRIEF_FIELDS: tuple[str, ...] = tuple(s.field for s in BRIEF_SECTIONS)
 BRIEF_DB_SECTIONS: tuple[str, ...] = tuple(s.db_name for s in BRIEF_SECTIONS)
-
-
-def field_to_db(field: str) -> str:
-    return _BY_FIELD[field].db_name
-
-
-def db_to_field(db_name: str) -> str:
-    return _BY_DB[db_name].field
 
 
 def section_headings() -> tuple[tuple[str, str], ...]:
@@ -91,8 +80,6 @@ __all__ = [
     "BRIEF_DB_SECTIONS",
     "FIELD_TO_DB",
     "DB_TO_FIELD",
-    "field_to_db",
-    "db_to_field",
     "section_headings",
     "build_brief_from_grouped",
 ]

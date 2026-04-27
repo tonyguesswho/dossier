@@ -57,44 +57,30 @@ def _load_user_investigation(eng: Engine, investigation_id: UUID, clerk_user_id:
     return row
 
 
-def _run_graph_sync(investigation_id: UUID) -> None:
-    from dossier.investigate.graph.runner import run_graph_sync  # noqa: PLC0415
-    run_graph_sync(str(investigation_id))
-
-
-def _dispatch_local(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
-    background_tasks.add_task(_run_graph_sync, investigation_id)
-
-
-def _dispatch_lambda(investigation_id: UUID) -> None:
-    # Fire-and-forget self-invoke; Event returns immediately so POST stays under the 30s URL budget.
-    import boto3  # noqa: PLC0415
-
-    function_name = get_settings().lambda_function_name
-    if not function_name:
-        raise RuntimeError(
-            "LAMBDA_FUNCTION_NAME env var required when DOSSIER_DISPATCH_MODE=lambda"
-        )
-
-    client = boto3.client("lambda")
-    client.invoke(
-        FunctionName=function_name,
-        InvocationType="Event",
-        Payload=json.dumps({"investigation_id": str(investigation_id)}).encode(),
-    )
-    logger.info(
-        "dispatch_lambda: queued investigation_id=%s on function=%s",
-        investigation_id, function_name,
-    )
-
-
 def _dispatch_pipeline(background_tasks: BackgroundTasks, investigation_id: UUID) -> None:
     # Read mode at call time so flipping the env var doesn't need a process restart.
     mode = get_settings().dispatch_mode
-    if mode == "lambda":
-        _dispatch_lambda(investigation_id)
-    elif mode == "local":
-        _dispatch_local(background_tasks, investigation_id)
+    if mode == "local":
+        from dossier.investigate.graph.runner import run_graph_sync  # noqa: PLC0415
+        background_tasks.add_task(run_graph_sync, str(investigation_id))
+    elif mode == "lambda":
+        # Fire-and-forget self-invoke; Event returns immediately so POST stays under the 30s URL budget.
+        import boto3  # noqa: PLC0415
+        function_name = get_settings().lambda_function_name
+        if not function_name:
+            raise RuntimeError(
+                "LAMBDA_FUNCTION_NAME env var required when DOSSIER_DISPATCH_MODE=lambda"
+            )
+        client = boto3.client("lambda")
+        client.invoke(
+            FunctionName=function_name,
+            InvocationType="Event",
+            Payload=json.dumps({"investigation_id": str(investigation_id)}).encode(),
+        )
+        logger.info(
+            "dispatch_lambda: queued investigation_id=%s on function=%s",
+            investigation_id, function_name,
+        )
     else:
         raise RuntimeError(f"unknown DOSSIER_DISPATCH_MODE={mode!r}")
 

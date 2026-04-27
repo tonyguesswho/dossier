@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -51,7 +51,7 @@ class CreateInvestigationBody(BaseModel):
 
     kind: Literal["name", "url"]
     value: str = Field(min_length=1, max_length=200)
-    context_hint: Optional[str] = Field(default=None, max_length=500)
+    context_hint: str | None = Field(default=None, max_length=500)
 
     @field_validator("value")
     @classmethod
@@ -64,7 +64,7 @@ class CreateInvestigationBody(BaseModel):
 
     @field_validator("context_hint")
     @classmethod
-    def _check_hint(cls, v: Optional[str]) -> Optional[str]:
+    def _check_hint(cls, v: str | None) -> str | None:
         if v is None:
             return None
         _check_injection_patterns(v)
@@ -108,9 +108,9 @@ class InvestigationStatusResponse(BaseModel):
     display_name: str
     sources_count: int = 0
     claims_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
     started_at: datetime
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
 
 class SourceListItem(BaseModel):
@@ -150,8 +150,8 @@ class InvestigationBriefResponse(BaseModel):
     brief_markdown: str
     sources: list[SourceListItem]
     started_at: datetime
-    completed_at: Optional[datetime] = None
-    scorecard: Optional[ScorecardResponse] = None
+    completed_at: datetime | None = None
+    scorecard: ScorecardResponse | None = None
 
 
 class ChatMessageItem(BaseModel):

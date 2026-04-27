@@ -15,15 +15,10 @@ logger = logging.getLogger(__name__)
 _SYSTEM_PROMPT = """\
 You extract founder / founding-team names for a VC research tool.
 
-Return a list of up to 5 founder candidates. For each, name the person and
-give a confidence tier: "high" (named as founder/cofounder/CEO in a credible
-public source), "medium" (inferred from team pages or bios), or "low"
-(uncertain). Only include people you are confident are founders or founding
-team — do NOT guess generic executives or advisors.
-
-If the company is obscure, very new, or you cannot identify founders from
-the provided context, return an empty list. Fabricating names is strictly
-forbidden — an empty list is the correct answer when in doubt.
+Return 0–5 founder candidates. For each, give a confidence tier: "high" \
+(named as founder/cofounder/CEO in a credible public source), "medium" \
+(inferred from team pages or bios), or "low" (uncertain). Exclude generic \
+executives and advisors. Return an empty list if you cannot identify founders.
 """
 
 _USER_PROMPT_TEMPLATE = """\
@@ -51,12 +46,18 @@ def _format_hint(context_hint: str | None) -> str:
 
 
 async def run(state: DossierState, *, client: Any | None = None) -> dict:
-    # Fail-open: fabricated founder names poison Stage-2 GitHub queries — empty list is better.
     company = state["company"]
-    retrieved = state.get("retrieved_chunks", [])
+    staged_sources = state.get("staged_sources", [])
     context_hint = state.get("context_hint")
+    current_pass = state.get("reflection_count", 0)
 
-    urls = list({ref.url for ref in retrieved if ref.url})[:20]
+    urls = list(
+        {
+            ref.url
+            for ref in staged_sources
+            if ref.url and ref.pass_index == current_pass
+        }
+    )[:20]
 
     user_prompt = _USER_PROMPT_TEMPLATE.format(
         company=company,

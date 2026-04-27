@@ -31,14 +31,6 @@ def strong_model() -> OpenAI:
     return OpenAI(base_url=OPENROUTER_BASE_URL, api_key=api_key)
 
 
-def cheap_model() -> str:
-    return CHEAP_MODEL_ID
-
-
-def embedding_model() -> str:
-    return EMBEDDING_MODEL_ID
-
-
 def embedding_client() -> OpenAI:
     # Embeddings go direct to api.openai.com — OpenRouter doesn't proxy /v1/embeddings.
     api_key = get_settings().openai_api_key.get_secret_value()
@@ -141,11 +133,9 @@ __all__ = [
     "ModelAlias",
     "OPENROUTER_BASE_URL",
     "STRONG_MODEL_ID",
-    "cheap_model",
     "completion",
     "embed",
     "embedding_client",
-    "embedding_model",
     "strong_model",
     "structured_call",
     "structured_call_with_status",
