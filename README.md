@@ -79,6 +79,22 @@ Full rationale for every choice, plus the rejected alternatives: **[DECISIONS.md
 
 ---
 
+## Prompt engineering
+
+Five distinct techniques across the graph nodes:
+
+| Node | Technique | Detail |
+|---|---|---|
+| `synthesizer` | **Structured output** | Sonnet is called with `response_format=Brief` (Pydantic). Every claim must carry a `quoted_span` and `source_chunk_id` — the schema makes hallucination structurally harder. |
+| `synthesizer` | **Adversarial instruction isolation** | Retrieved web content is wrapped in `<retrieved_content>` tags and the system prompt explicitly labels it UNTRUSTED DATA. The model is told that anything inside those tags is never an instruction — this is prompt-injection defence built into the prompt, not a post-processing filter. |
+| `synthesizer` | **Source diversity instruction** | Explicit instruction to spread `source_chunk_id` across as many distinct chunks as the content allows. Without this, the model repeatedly cites the highest-ranked chunk, which makes the brief look less grounded than it is. |
+| `founder_extraction` | **Confidence-tiered extraction** | Haiku returns each founder candidate with a tier: `high` / `medium` / `low`, defined by operational criteria (named as founder in a credible source vs. inferred from a team page). Low-confidence names are used only to seed GitHub lookups, not surfaced in the brief. |
+| `ingest_and_embed` | **Injection classifier** | Before any chunk is embedded, a second Haiku call at `temperature=0.0` classifies it as `clean` or `injection`. Flagged chunks are dropped before they reach the vector store, so a poisoned web page can't steer synthesis. |
+
+The model split — Haiku for all classification/extraction work, Sonnet only for the synthesis prose — keeps the per-investigation token cost roughly 4× lower than using Sonnet everywhere.
+
+---
+
 ## Key files
 
 | File | What it does |
@@ -121,13 +137,13 @@ pnpm dev
 
 ```bash
 # Tests
-cd backend && uv run pytest -q                     # 180 unit tests, no network
+cd backend && uv run pytest -q                     # ~180 unit tests, no network
 cd backend && uv run pytest tests/integration -q   # requires live DB
-
-# Eval
 cd backend && uv run python -m dossier.eval.report
 cd backend && uv run python -m dossier.eval.report --json   # machine-readable
 ```
+
+Unit tests cover: grounding logic (`test_ground.py`), citation precision scorer (`test_scorer.py`), all LangGraph graph nodes (`tests/unit/graph/` — synthesizer, verifier, finalize, ingest, founder extraction, injection classifier, checkpoint resume), API routes and schemas (`test_api_main.py`, `test_api_schemas.py`), tool clients (`test_tools_exa.py`, `test_tools_firecrawl.py`, `test_tools_github.py`), and the LLM wrapper retry logic (`test_llm.py`). Integration tests (`tests/integration/`) hit a live Postgres+pgvector instance and cover the investigations API routes end-to-end and pgvector retrieval.
 
 ---
 
